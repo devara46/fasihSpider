@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Fasih Spider",
+  "version": "1.0.0",
+  "description": "Collect BPS FASIH region hierarchy data from level 3 down to level 7",
+  "permissions": ["storage", "tabs", "cookies", "scripting", "downloads"],
+  "host_permissions": [
+    "https://fasih-sm.bps.go.id/*",
+    "https://fasih-dashboard.bps.go.id/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Fasih Spider"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

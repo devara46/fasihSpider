@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 240px;
+      padding: 16px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .logo-icon {
+      width: 28px; height: 28px;
+      background: linear-gradient(135deg, #0ea5e9, #6366f1);
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+    }
+    h3 { font-size: 13px; color: #94a3b8; font-weight: 500; line-height: 1.3; }
+    h2 { font-size: 15px; color: #f1f5f9; }
+    button {
+      width: 100%;
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: linear-gradient(135deg, #0ea5e9, #6366f1);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 13px;
+      transition: opacity 0.15s;
+    }
+    button:hover { opacity: 0.85; }
+    .note {
+      margin-top: 10px;
+      font-size: 11px;
+      color: #64748b;
+      line-height: 1.5;
+    }
+    .note strong { color: #94a3b8; }
+    hr { border: none; border-top: 1px solid #1e293b; margin: 12px 0; }
+  </style>
+</head>
+<body>
+  <div class="logo">
+    <div class="logo-icon">&#127758;</div>
+    <div>
+      <h2>Fasih Spider</h2>
+      <h3>BPS FASIH Hierarchy</h3>
+    </div>
+  </div>
+  <hr>
+  <button id="openBtn">Open Collector Page</button>
+  <p class="note">
+    <strong>Before starting:</strong> make sure you are logged into
+    <em>fasih-sm.bps.go.id</em> in this Chrome profile.
+  </p>
+  <script src="popup.js"></script>
+</body>
+</html>

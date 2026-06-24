@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fasih Spider</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg:#0f172a; --bg2:#1e293b; --bg3:#293548; --border:#334155;
+      --text:#e2e8f0; --muted:#94a3b8; --accent:#0ea5e9; --violet:#6366f1;
+      --green:#22c55e; --yellow:#eab308; --red:#ef4444; --r:8px;
+    }
+    html,body{height:100%;overflow:hidden;}
+    body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:13px;line-height:1.5;display:flex;flex-direction:row;}
+    .app{display:flex;flex-direction:row;width:100%;height:100%;min-height:0;}
+    .vnav{background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;width:148px;padding:10px 0;}
+    .vnav-brand{display:flex;align-items:center;gap:8px;padding:0 14px 12px;border-bottom:1px solid var(--border);margin-bottom:8px;}
+    .vnav-brand .hicon{width:26px;height:26px;font-size:13px;}
+    .vnav-brand b{font-size:12px;color:#f1f5f9;}
+    .nav-btn{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:9px 14px;background:none;border:none;border-left:3px solid transparent;color:var(--muted);cursor:pointer;font-size:12px;font-weight:500;text-align:left;transition:color .15s,border-color .15s,background .15s;width:100%;}
+    .nav-btn .nb-ico{font-size:14px;margin-right:6px;}
+    .nav-btn .nb-sub{font-size:9.5px;color:#475569;font-weight:400;}
+    .nav-btn:hover{color:var(--text);background:var(--bg3);}
+    .nav-btn.active{color:var(--accent);border-left-color:var(--accent);background:#0c4a6e22;}
+    .nav-group{display:flex;flex-direction:column;}
+    .nav-group-label{display:flex;align-items:center;gap:6px;padding:10px 14px 4px;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#475569;}
+    .nav-group .nav-btn{padding-left:30px;}
+    .nav-group .nav-btn .nb-ico{font-size:12px;}
+    .nav-divider{border:none;border-top:1px solid var(--border);margin:8px 14px;}
+    .page{flex:1;display:flex;flex-direction:column;min-height:0;min-width:0;}
+    header{background:var(--bg2);border-bottom:1px solid var(--border);padding:9px 18px;display:flex;align-items:center;gap:10px;flex-shrink:0;}
+    .hicon{width:28px;height:28px;background:linear-gradient(135deg,var(--accent),var(--violet));border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;}
+    header h1{font-size:14px;font-weight:700;color:#f1f5f9;}
+    header p{font-size:11px;color:var(--muted);}
+    .tab-content{flex:1;display:none;flex-direction:column;min-height:0;}
+    .tab-content.active{display:flex;}
+    .split{flex:1;display:grid;grid-template-columns:290px 1fr;grid-template-rows:auto 1fr;min-height:0;}
+    .panel{padding:12px 14px;border-right:1px solid var(--border);border-bottom:1px solid var(--border);overflow-y:auto;}
+    .panel.no-br{border-right:none;}.panel.no-bb{border-bottom:none;}
+    .panel.cfg{grid-row:1/3;border-bottom:none;}
+    .panel.stats{grid-row:1;}
+    .panel.log-p{grid-row:2;display:flex;flex-direction:column;border-right:none;border-bottom:none;}
+    .slabel{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}
+    .field{margin-bottom:9px;}
+    .field label{display:block;font-size:11px;color:var(--muted);margin-bottom:3px;}
+    .field input,.field select{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:5px 8px;font-size:12px;outline:none;}
+    .field input:focus,.field select:focus{border-color:var(--accent);}
+    .field .hint{font-size:10px;color:var(--muted);margin-top:2px;}
+    .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;}
+    .row2{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+    .btn-row{display:flex;gap:6px;margin-top:4px;}
+    .btn{flex:1;padding:7px 10px;border:none;border-radius:var(--r);cursor:pointer;font-weight:600;font-size:12px;transition:opacity .15s;}
+    .btn:active{opacity:.8;}.btn:disabled{opacity:.35;cursor:not-allowed;}
+    .btn-start{background:linear-gradient(135deg,var(--accent),var(--violet));color:#fff;}
+    .btn-stop{background:var(--bg3);color:var(--red);border:1px solid var(--red);}
+    .btn-exp{background:var(--bg3);color:var(--muted);border:1px solid var(--border);font-size:11px;}
+    .btn-exp:hover:not(:disabled){border-color:var(--accent);color:var(--accent);}
+    .btn-exp.csv:hover:not(:disabled){border-color:var(--green);color:var(--green);}
+    .btn-exp.xlsx:hover:not(:disabled){border-color:#22d3ee;color:#22d3ee;}
+    .radio-group{display:flex;gap:5px;margin-bottom:9px;}
+    .radio-btn{flex:1;padding:5px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);cursor:pointer;font-size:11px;color:var(--muted);text-align:center;transition:all .15s;}
+    .radio-btn.active{border-color:var(--accent);color:var(--accent);background:#0c4a6e33;}
+    .stat-row{display:flex;flex-wrap:wrap;gap:5px 12px;margin-bottom:8px;}
+    .stat{font-size:11px;color:var(--muted);}.stat span{color:var(--text);font-weight:700;}
+    .badge{display:inline-block;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;}
+    .badge.idle{background:var(--bg3);color:var(--muted);}
+    .badge.running{background:#0c4a6e;color:var(--accent);}
+    .badge.done{background:#14532d;color:var(--green);}
+    .badge.stopped{background:#451a03;color:var(--yellow);}
+    .level-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;}
+    .lcard{background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:4px 6px;text-align:center;}
+    .lcard .lbl{font-size:9px;color:var(--muted);}
+    .lcard .cnt{font-size:16px;font-weight:700;color:var(--accent);line-height:1.2;}
+    .lcard .nm{font-size:9px;color:var(--muted);}
+    .log-area{flex:1;overflow-y:auto;font-family:'Cascadia Code',Consolas,monospace;font-size:11px;line-height:1.65;}
+    .le{padding:0;}.lts{color:#475569;margin-right:5px;}
+    .li{color:#94a3b8;}.ls{color:var(--green);}.lw{color:var(--yellow);}.lr{color:var(--red);}
+    .dl-bar{display:none;background:#0c4a6e18;border-top:1px solid var(--accent);padding:9px 14px;flex-shrink:0;}
+    .dl-bar .dl-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+    .dl-bar .dl-info{font-size:12px;color:var(--muted);}
+    .dl-bar .dl-info strong{color:var(--accent);font-size:14px;}
+    .info-box{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:7px 9px;font-size:11px;color:var(--muted);margin-bottom:9px;}
+    .info-box strong{color:var(--text);}
+    .drop-area{border:2px dashed var(--border);border-radius:var(--r);padding:14px;text-align:center;color:var(--muted);font-size:11px;cursor:pointer;transition:border-color .15s;margin-bottom:9px;}
+    .drop-area:hover,.drop-area.drag{border-color:var(--accent);color:var(--accent);}
+    .divider{border:none;border-top:1px solid var(--border);margin:10px 0;}
+    .prog-wrap{background:var(--bg3);border-radius:4px;height:5px;overflow:hidden;margin-top:4px;}
+    .prog-bar{height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--violet));transition:width .3s;}
+    .btn-exp.err { border-color: #78350f; color: var(--yellow); }
+    .btn-exp.err:not(:disabled):hover { border-color: var(--yellow); color: #fef08a; }
+    .btn-exp.err:disabled { opacity:.35; cursor:not-allowed; }
+    .dl-sep { width:1px; background:var(--border); margin:0 4px; align-self:stretch; }
+    .btn-clear{background:var(--bg3);color:var(--red);border:1px solid var(--border);font-size:11px;padding:5px 10px;border-radius:var(--r);cursor:pointer;margin-top:6px;width:100%;} .btn-clear:hover{border-color:var(--red);}
+    ::-webkit-scrollbar{width:5px;} ::-webkit-scrollbar-track{background:var(--bg2);} ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+    #t4-payload{width:100%;min-height:160px;resize:vertical;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);color:var(--text);padding:8px 10px;font-family:'Cascadia Code',Consolas,monospace;font-size:11.5px;line-height:1.5;outline:none;}
+    #t4-payload:focus{border-color:var(--accent);}
+    .resume-banner{display:none;background:#451a0333;border:1px solid var(--yellow);border-radius:var(--r);padding:9px 11px;font-size:11.5px;color:#fde68a;margin-bottom:9px;}
+    .resume-banner .rb-row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+    .resume-banner .btn{flex:none;padding:5px 10px;font-size:11px;}
+    #exp-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.7);align-items:center;justify-content:center;z-index:1000;}
+    .exp-modal{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:20px 22px;width:300px;text-align:center;box-shadow:0 12px 32px rgba(0,0,0,.4);}
+    .exp-modal h3{font-size:13px;color:#f1f5f9;margin-bottom:8px;}
+    .exp-modal #exp-detail{font-size:11.5px;color:var(--muted);margin-bottom:10px;}
+    .exp-modal #exp-cancel{margin-top:12px;width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--r);background:var(--bg3);color:var(--red);cursor:pointer;font-size:12px;font-weight:600;}
+    .exp-modal #exp-cancel:hover{border-color:var(--red);}
+    .link-table-wrap{margin:14px 18px 18px;border:1px solid var(--border);border-radius:var(--r);overflow:auto;max-height:320px;}
+    .link-table{width:100%;border-collapse:collapse;font-size:11.5px;}
+    .link-table th,.link-table td{padding:6px 10px;border-bottom:1px solid var(--border);text-align:left;}
+    .link-table th{position:sticky;top:0;background:var(--bg2);color:var(--muted);font-weight:700;}
+    .link-table tbody tr:nth-child(even){background:var(--bg3);}
+    .link-table td:first-child,.link-table th:first-child{white-space:nowrap;}
+    .link-table a{color:var(--accent);text-decoration:none;}
+    .link-table a:hover{text-decoration:underline;}
+  </style>
+</head>
+<body>
+<div class="app">
+  <nav class="vnav">
+    <div class="vnav-brand"><div class="hicon">&#127760;</div><b>Fasih Spider</b></div>
+    <button class="nav-btn active" data-tab="t4"><span><span class="nb-ico">&#128202;</span>Report Progress</span><span class="nb-sub">By responsibility</span></button>
+    <button class="nav-btn"        data-tab="t5"><span><span class="nb-ico">&#128221;</span>SQL Lab</span><span class="nb-sub">Close all tabs</span></button>
+    <hr class="nav-divider">
+    <div class="nav-group-label">&#128737; Raw Collector</div>
+    <div class="nav-group">
+      <button class="nav-btn" data-tab="t1"><span><span class="nb-ico">&#127758;</span>Region Hierarchy</span><span class="nb-sub">Level 3&ndash;7 codes</span></button>
+      <button class="nav-btn" data-tab="t2"><span><span class="nb-ico">&#128203;</span>Assignment List</span><span class="nb-sub">By smallest code</span></button>
+      <button class="nav-btn" data-tab="t3"><span><span class="nb-ico">&#128196;</span>Assignment Detail</span><span class="nb-sub">Survey answers</span></button>
+    </div>
+  </nav>
+  <div class="page">
+  <header>
+    <div class="hicon">&#127760;</div>
+    <div>
+      <h1>Fasih Spider</h1>
+      <p>BPS FASIH &mdash; Report Progress &bull; Raw Collector (Region Hierarchy, Assignment List, Assignment Detail)</p>
+    </div>
+  </header>
+
+<!-- ===== TAB 1: Region Hierarchy ===== -->
+<div class="tab-content" id="t1">
+  <div class="split">
+    <div class="panel cfg">
+      <div class="slabel">Configuration</div>
+      <div class="field">
+        <label>Level 2 Full Code</label>
+        <input id="t1-l2" type="text" placeholder="e.g. 5206" maxlength="10">
+        <div class="hint">Kabupaten/Kota code</div>
+      </div>
+      <div class="row3">
+        <div class="field"><label>Max Level</label>
+          <select id="t1-maxlv"><option>3</option><option>4</option><option>5</option><option>6</option><option value="7" selected>7</option></select>
+        </div>
+        <div class="field"><label>Concurrency</label><input id="t1-conc" type="number" value="3" min="1" max="10"></div>
+        <div class="field"><label>Delay (ms)</label><input id="t1-delay" type="number" value="0" min="0" max="5000" step="50"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-start" id="t1-start">&#9654; Start</button>
+        <button class="btn btn-stop"  id="t1-stop" disabled>&#9632; Stop</button>
+      </div>
+      <hr class="divider">
+      <div class="slabel">Level Reference</div>
+      <div style="font-size:11px;color:var(--muted);line-height:2.1;">3=Kecamatan &nbsp;4=Desa/Kel<br>5=SLS &nbsp;6=Sub-SLS &nbsp;7=Sub2-SLS</div>
+      <hr class="divider">
+      <div id="t1-prev" style="display:none;">
+        <div class="info-box"><strong id="t1-prev-info">Previous results</strong></div>
+        <button class="btn btn-exp" id="t1-load-prev" style="flex:none;width:100%;margin-bottom:8px;">&#8635; Load Previous</button>
+      </div>
+      <div style="margin-top:6px;padding:7px 9px;background:var(--bg3);border-radius:var(--r);font-size:10px;color:var(--muted);line-height:1.7;">
+        Must be logged into <em>fasih-sm.bps.go.id</em> in this Chrome profile.
+      </div>
+    </div>
+    <div class="panel stats no-br">
+      <div class="slabel">Status</div>
+      <div class="stat-row">
+        <div class="stat">Status: <span id="t1-badge" class="badge idle">Idle</span></div>
+        <div class="stat">Requests: <span id="t1-req">0</span></div>
+        <div class="stat">Rows: <span id="t1-rows">0</span></div>
+        <div class="stat">Errors: <span id="t1-err">0</span></div>
+        <div class="stat">Active: <span id="t1-act">0</span></div>
+        <div class="stat">Elapsed: <span id="t1-elapsed">0s</span></div>
+      </div>
+      <div class="level-grid">
+        <div class="lcard"><div class="lbl">L3</div><div class="cnt" id="lc3">0</div><div class="nm">Kecamatan</div></div>
+        <div class="lcard"><div class="lbl">L4</div><div class="cnt" id="lc4">0</div><div class="nm">Desa</div></div>
+        <div class="lcard"><div class="lbl">L5</div><div class="cnt" id="lc5">0</div><div class="nm">SLS</div></div>
+        <div class="lcard"><div class="lbl">L6</div><div class="cnt" id="lc6">0</div><div class="nm">Sub-SLS</div></div>
+        <div class="lcard"><div class="lbl">L7</div><div class="cnt" id="lc7">0</div><div class="nm">Sub2-SLS</div></div>
+      </div>
+    </div>
+    <div class="panel log-p no-br no-bb">
+      <div class="slabel">Activity Log</div>
+      <div class="log-area" id="t1-log-area"></div>
+    </div>
+  </div>
+  <div class="dl-bar" id="t1-dl">
+    <div class="dl-row">
+      <div class="dl-info">Ready: <strong id="t1-dl-count">0</strong> rows</div>
+      <button class="btn btn-exp"      id="t1-json">&#128196; JSON</button>
+      <button class="btn btn-exp csv"  id="t1-csv">&#128202; CSV</button>
+      <button class="btn btn-exp xlsx" id="t1-xlsx">&#128209; XLSX</button>
+      <div class="dl-sep"></div>
+      <button class="btn btn-exp err" id="t1-err-exp" disabled>&#9888; No errors</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TAB 2: Assignment List ===== -->
+<div class="tab-content" id="t2">
+  <div class="split">
+    <div class="panel cfg">
+      <div class="slabel">Data Source</div>
+      <div class="radio-group">
+        <div class="radio-btn active" id="t2-src-tab1">Tab 1 Results</div>
+        <div class="radio-btn"       id="t2-src-file">Upload File</div>
+      </div>
+      <div id="t2-from-tab1">
+        <div class="info-box" id="t2-tab1-info">No Tab 1 results yet.</div>
+        <div class="field">
+          <label>Use fullCodes from level</label>
+          <select id="t2-level-sel">
+            <option value="deepest" selected>Deepest available (recommended)</option>
+            <option value="3">Level 3 (Kecamatan)</option>
+            <option value="4">Level 4 (Desa)</option>
+            <option value="5">Level 5 (SLS)</option>
+            <option value="6">Level 6 (Sub-SLS)</option>
+            <option value="7">Level 7 (Sub2-SLS)</option>
+          </select>
+        </div>
+      </div>
+      <div id="t2-from-file" style="display:none;">
+        <div class="drop-area" id="t2-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">.json .csv .txt .xlsx</span></div>
+        <input type="file" id="t2-file-input" accept=".json,.csv,.txt,.xlsx,.xls" style="display:none;">
+        <div class="info-box" id="t2-file-info" style="display:none;"></div>
+      </div>
+      <hr class="divider">
+      <div class="slabel">Settings</div>
+      <div class="row2">
+        <div class="field"><label>Concurrency</label><input id="t2-conc" type="number" value="3" min="1" max="10"></div>
+        <div class="field"><label>Delay (ms)</label><input id="t2-delay" type="number" value="50" min="0" max="5000" step="50"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-start" id="t2-start">&#9654; Start</button>
+        <button class="btn btn-stop"  id="t2-stop" disabled>&#9632; Stop</button>
+      </div>
+      <hr class="divider">
+      <div class="slabel">Local Database</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Results stream directly to IndexedDB. Data persists if the tab closes.</div>
+      <button class="btn-clear" id="t2-clear-db">&#128465; Clear DB</button>
+      <hr class="divider">
+      <div style="font-size:10px;color:var(--muted);line-height:1.7;">
+        <strong style="color:var(--text);">Endpoint:</strong><br>
+        <span style="word-break:break-all;color:#475569;">/api/assignments/get-principal-values-by-smallest-code/fd68e454-.../{fullCode}</span>
+      </div>
+    </div>
+    <div class="panel stats no-br">
+      <div class="slabel">Status</div>
+      <div class="stat-row">
+        <div class="stat">Status: <span id="t2-badge" class="badge idle">Idle</span></div>
+        <div class="stat">Total: <span id="t2-total">0</span></div>
+        <div class="stat">Done: <span id="t2-done">0</span></div>
+        <div class="stat">Found: <span id="t2-found">0</span></div>
+        <div class="stat">Errors: <span id="t2-err">0</span></div>
+        <div class="stat">Active: <span id="t2-act">0</span></div>
+        <div class="stat">Elapsed: <span id="t2-elapsed">0s</span></div>
+      </div>
+      <div class="prog-wrap"><div class="prog-bar" id="t2-prog"></div></div>
+    </div>
+    <div class="panel log-p no-br no-bb">
+      <div class="slabel">Activity Log</div>
+      <div class="log-area" id="t2-log-area"></div>
+    </div>
+  </div>
+  <div class="dl-bar" id="t2-dl">
+    <div class="dl-row">
+      <div class="dl-info">Ready: <strong id="t2-dl-count">0</strong> assignments <span style="font-size:10px;color:var(--muted);">CSV=Save dialog &bull; XLSX=split 50K/file</span></div>
+      <button class="btn btn-exp"      id="t2-json">&#128196; JSON</button>
+      <button class="btn btn-exp csv"  id="t2-csv">&#128202; CSV</button>
+      <button class="btn btn-exp xlsx" id="t2-xlsx">&#128209; XLSX</button>
+      <div class="dl-sep"></div>
+      <button class="btn btn-exp err" id="t2-err-exp" disabled>&#9888; No errors</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TAB 3: Assignment Detail ===== -->
+<div class="tab-content" id="t3">
+  <div class="split">
+    <div class="panel cfg">
+      <div class="slabel">Data Source</div>
+      <div class="radio-group">
+        <div class="radio-btn active" id="t3-src-tab2">Tab 2 Results</div>
+        <div class="radio-btn"       id="t3-src-file">Upload File</div>
+      </div>
+      <div id="t3-from-tab2">
+        <div class="info-box" id="t3-tab2-info">No Tab 2 results yet.</div>
+      </div>
+      <div id="t3-from-file" style="display:none;">
+        <div class="drop-area" id="t3-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">.json .csv .txt — one assignmentId per line/row</span></div>
+        <input type="file" id="t3-file-input" accept=".json,.csv,.txt,.xlsx,.xls" style="display:none;">
+        <div class="info-box" id="t3-file-info" style="display:none;"></div>
+      </div>
+      <hr class="divider">
+      <div class="slabel">Export Content</div>
+      <div class="radio-group">
+        <div class="radio-btn active" id="t3-mode-data">Survey Data</div>
+        <div class="radio-btn"       id="t3-mode-predef">Pre-defined</div>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:9px;line-height:1.65;">
+        <strong style="color:var(--text);">Survey Data</strong> = parsed <code>data.answers</code> array (submitted responses).<br>
+        <strong style="color:var(--text);">Pre-defined</strong> = parsed <code>pre_defined_data.predata</code> (prelist values).
+      </div>
+      <hr class="divider">
+      <div class="slabel">Settings</div>
+      <div class="row2">
+        <div class="field"><label>Concurrency</label><input id="t3-conc" type="number" value="2" min="1" max="5"></div>
+        <div class="field"><label>Delay (ms)</label><input id="t3-delay" type="number" value="100" min="0" max="5000" step="50"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-start" id="t3-start">&#9654; Start</button>
+        <button class="btn btn-stop"  id="t3-stop" disabled>&#9632; Stop</button>
+      </div>
+      <hr class="divider">
+      <div class="slabel">Local Database</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Answers pre-parsed and stored in IndexedDB. CSV streams to disk via Save dialog. XLSX auto-splits at 50K rows per file.</div>
+      <button class="btn-clear" id="t3-clear-db">&#128465; Clear DB</button>
+      <hr class="divider">
+      <div style="font-size:10px;color:var(--muted);line-height:1.7;">
+        <strong style="color:var(--text);">Endpoint:</strong><br>
+        <span style="word-break:break-all;color:#475569;">/api/assignment/get-by-assignment-id?assignmentId={id}</span>
+      </div>
+    </div>
+    <div class="panel stats no-br">
+      <div class="slabel">Status</div>
+      <div class="stat-row">
+        <div class="stat">Status: <span id="t3-badge" class="badge idle">Idle</span></div>
+        <div class="stat">Total: <span id="t3-total">0</span></div>
+        <div class="stat">Done: <span id="t3-done">0</span></div>
+        <div class="stat">Errors: <span id="t3-err">0</span></div>
+        <div class="stat">Active: <span id="t3-act">0</span></div>
+        <div class="stat">Elapsed: <span id="t3-elapsed">0s</span></div>
+      </div>
+      <div class="prog-wrap"><div class="prog-bar" id="t3-prog"></div></div>
+    </div>
+    <div class="panel log-p no-br no-bb">
+      <div class="slabel">Activity Log</div>
+      <div class="log-area" id="t3-log-area"></div>
+    </div>
+  </div>
+  <div class="dl-bar" id="t3-dl">
+    <div class="dl-row">
+      <div class="dl-info">Ready: <strong id="t3-dl-count">0</strong> assignments <span style="font-size:10px;color:var(--muted);">CSV=Save dialog &bull; XLSX=split 50K/file</span></div>
+      <button class="btn btn-exp"      id="t3-json">&#128196; JSON</button>
+      <button class="btn btn-exp csv"  id="t3-csv">&#128202; CSV</button>
+      <button class="btn btn-exp xlsx" id="t3-xlsx">&#128209; XLSX</button>
+      <div class="dl-sep"></div>
+      <button class="btn btn-exp err" id="t3-err-exp" disabled>&#9888; No errors</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TAB 4: Report Progress by Responsibility ===== -->
+<div class="tab-content active" id="t4">
+  <div class="split">
+    <div class="panel cfg">
+      <div class="slabel">Request Payload</div>
+      <div class="resume-banner" id="t4-resume">
+        <div class="rb-row">
+          <span id="t4-resume-text"></span>
+          <span style="display:flex;gap:6px;">
+            <button class="btn btn-start" id="t4-resume-btn">Resume</button>
+            <button class="btn btn-stop" id="t4-startover-btn">Start over</button>
+          </span>
+        </div>
+      </div>
+      <textarea id="t4-payload" spellcheck="false"></textarea>
+      <div class="hint" style="margin:4px 0 9px;">Sent as-is each call. <code>page</code> is overwritten automatically.</div>
+      <div class="btn-row">
+        <button class="btn btn-start" id="t4-start">&#9654; Start</button>
+        <button class="btn btn-stop"  id="t4-stop" disabled>&#9632; Stop</button>
+      </div>
+      <hr class="divider">
+      <div style="font-size:10px;color:var(--muted);line-height:1.7;">
+        <strong style="color:var(--text);">Endpoint:</strong><br>
+        <span style="word-break:break-all;color:#475569;">/api/analytic/api/v2/assignment/report-progress-by-responsibility</span>
+      </div>
+    </div>
+    <div class="panel stats no-br">
+      <div class="slabel">Status</div>
+      <div class="stat-row">
+        <div class="stat">Status: <span id="t4-badge" class="badge idle">Idle</span></div>
+        <div class="stat">Page: <span id="t4-page">0</span></div>
+        <div class="stat">Records: <span id="t4-records">0</span></div>
+        <div class="stat">Errors: <span id="t4-err">0</span></div>
+        <div class="stat">Elapsed: <span id="t4-elapsed">0s</span></div>
+      </div>
+      <hr class="divider">
+      <div class="slabel">Result</div>
+      <div class="info-box" id="t4-result-info">No data collected yet.</div>
+      <div class="slabel" style="margin-top:9px;">Aggregated by iddesa</div>
+      <div class="info-box" id="t4-agg-info">No data collected yet.</div>
+    </div>
+    <div class="panel log-p no-br no-bb">
+      <div class="slabel">Activity Log</div>
+      <div class="log-area" id="t4-log-area"></div>
+    </div>
+  </div>
+  <div class="dl-bar" id="t4-dl">
+    <div class="dl-row">
+      <div class="dl-info">Ready: <strong id="t4-dl-count">0</strong> records</div>
+      <button class="btn btn-exp"      id="t4-json">&#128196; JSON</button>
+      <button class="btn btn-exp csv"  id="t4-csv">&#128202; CSV</button>
+      <button class="btn btn-exp xlsx" id="t4-xlsx">&#128209; XLSX</button>
+      <div class="dl-sep"></div>
+      <div class="dl-info">Aggregated: <strong id="t4-agg-dl-count">0</strong> villages</div>
+      <button class="btn btn-exp"      id="t4-agg-json">&#128196; JSON</button>
+      <button class="btn btn-exp csv"  id="t4-agg-csv">&#128202; CSV</button>
+      <button class="btn btn-exp xlsx" id="t4-agg-xlsx">&#128209; XLSX</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TAB 5: SQL Lab — close all tabs ===== -->
+<div class="tab-content" id="t5">
+  <div class="split" style="grid-template-columns:290px 1fr;">
+    <div class="panel cfg" style="grid-row:1/3;">
+      <div class="slabel">Target Page</div>
+      <div class="info-box">
+        Looks for an open tab on<br><span style="word-break:break-all;color:#475569;">https://fasih-dashboard.bps.go.id/superset/sqllab</span>,
+        closes every open SQL Lab tab there (last to first), then — if a link reference file is loaded below — for each <code>link</code> in order: opens it, clicks <strong>Run</strong>, waits for the results. On a DB engine error it retries the same query up to 3 times before recording it as a failure; on success it clicks <strong>Download to CSV</strong>; either way it then closes the tabs and moves to the next link.
+      </div>
+      <div class="row2">
+        <div class="field"><label>Delay (ms)</label><input id="t5-delay" type="number" value="400" min="0" max="5000" step="50"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-start" id="t5-start">&#9654; Start</button>
+        <button class="btn btn-stop"  id="t5-stop" disabled>&#9632; Stop</button>
+      </div>
+      <hr class="divider">
+      <div class="slabel">Load Link Reference</div>
+      <div class="hint" style="margin-bottom:6px;">File must have <code>kode</code>, <code>keterangan</code>, and <code>link</code> columns (header names, case-insensitive).</div>
+      <div class="drop-area" id="t5-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">.xlsx .csv .txt</span></div>
+      <input type="file" id="t5-file-input" accept=".xlsx,.xls,.csv,.txt" style="display:none;">
+      <div class="info-box" id="t5-file-info" style="display:none;"></div>
+    </div>
+    <div class="panel log-p no-br no-bb" style="grid-row:2;">
+      <div class="card__label-row" style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+        <div class="slabel">Activity Log</div>
+        <span style="display:flex;gap:8px;align-items:baseline;">
+          <button class="btn-exp err" id="t5-err-exp" disabled>&#9888; No errors</button>
+          <span class="badge idle" id="t5-badge">Idle</span>
+        </span>
+      </div>
+      <div class="log-area" id="t5-log-area"></div>
+    </div>
+  </div>
+  <div class="link-table-wrap" id="t5-link-wrap" style="display:none;">
+    <table class="link-table" id="t5-link-table"></table>
+  </div>
+</div>
+
+  </div>
+</div>
+
+<script src="lib/xlsx.mini.min.js"></script>
+<!-- Export progress overlay -->
+<div id="exp-overlay">
+  <div class="exp-modal">
+    <h3 id="exp-label">Exporting...</h3>
+    <div id="exp-detail">Starting...</div>
+    <div class="prog-wrap"><div class="prog-bar" id="exp-bar"></div></div>
+    <button id="exp-cancel">Cancel</button>
+  </div>
+</div>
+<script src="collector.js"></script>
+</body>
+</html>
