@@ -122,7 +122,7 @@
     <hr class="nav-divider">
     <div class="nav-group-label">&#128737; Raw Collector</div>
     <div class="nav-group">
-      <button class="nav-btn" data-tab="t1"><span><span class="nb-ico">&#127758;</span>Region Hierarchy</span><span class="nb-sub">Level 3&ndash;7 codes</span></button>
+      <button class="nav-btn" data-tab="t1"><span><span class="nb-ico">&#127758;</span>Region Hierarchy</span><span class="nb-sub">Level 3&ndash;6 codes</span></button>
       <button class="nav-btn" data-tab="t2"><span><span class="nb-ico">&#128203;</span>Assignment List</span><span class="nb-sub">By smallest code</span></button>
       <button class="nav-btn" data-tab="t3"><span><span class="nb-ico">&#128196;</span>Assignment Detail</span><span class="nb-sub">Survey answers</span></button>
     </div>
@@ -148,7 +148,7 @@
       </div>
       <div class="row3">
         <div class="field"><label>Max Level</label>
-          <select id="t1-maxlv"><option>3</option><option>4</option><option>5</option><option>6</option><option value="7" selected>7</option></select>
+          <select id="t1-maxlv"><option>3</option><option>4</option><option>5</option><option value="6" selected>6</option></select>
         </div>
         <div class="field"><label>Concurrency</label><input id="t1-conc" type="number" value="3" min="1" max="10"></div>
         <div class="field"><label>Delay (ms)</label><input id="t1-delay" type="number" value="0" min="0" max="5000" step="50"></div>
@@ -159,7 +159,7 @@
       </div>
       <hr class="divider">
       <div class="slabel">Level Reference</div>
-      <div style="font-size:11px;color:var(--muted);line-height:2.1;">3=Kecamatan &nbsp;4=Desa/Kel<br>5=SLS &nbsp;6=Sub-SLS &nbsp;7=Sub2-SLS</div>
+      <div style="font-size:11px;color:var(--muted);line-height:2.1;">3=Kecamatan &nbsp;4=Desa/Kel<br>5=SLS &nbsp;6=Sub-SLS</div>
       <hr class="divider">
       <div id="t1-prev" style="display:none;">
         <div class="info-box"><strong id="t1-prev-info">Previous results</strong></div>
@@ -179,12 +179,11 @@
         <div class="stat">Active: <span id="t1-act">0</span></div>
         <div class="stat">Elapsed: <span id="t1-elapsed">0s</span></div>
       </div>
-      <div class="level-grid">
+      <div class="level-grid" style="grid-template-columns:repeat(4,1fr);">
         <div class="lcard"><div class="lbl">L3</div><div class="cnt" id="lc3">0</div><div class="nm">Kecamatan</div></div>
         <div class="lcard"><div class="lbl">L4</div><div class="cnt" id="lc4">0</div><div class="nm">Desa</div></div>
         <div class="lcard"><div class="lbl">L5</div><div class="cnt" id="lc5">0</div><div class="nm">SLS</div></div>
         <div class="lcard"><div class="lbl">L6</div><div class="cnt" id="lc6">0</div><div class="nm">Sub-SLS</div></div>
-        <div class="lcard"><div class="lbl">L7</div><div class="cnt" id="lc7">0</div><div class="nm">Sub2-SLS</div></div>
       </div>
     </div>
     <div class="panel log-p no-br no-bb">
@@ -210,11 +209,11 @@
     <div class="panel cfg">
       <div class="slabel">Data Source</div>
       <div class="radio-group">
-        <div class="radio-btn active" id="t2-src-tab1">Tab 1 Results</div>
+        <div class="radio-btn active" id="t2-src-tab1">Region Hierarchy Tab Results</div>
         <div class="radio-btn"       id="t2-src-file">Upload File</div>
       </div>
       <div id="t2-from-tab1">
-        <div class="info-box" id="t2-tab1-info">No Tab 1 results yet.</div>
+        <div class="info-box" id="t2-tab1-info">No Region Hierarchy Tab results yet.</div>
         <div class="field">
           <label>Use fullCodes from level</label>
           <select id="t2-level-sel">
@@ -223,7 +222,6 @@
             <option value="4">Level 4 (Desa)</option>
             <option value="5">Level 5 (SLS)</option>
             <option value="6">Level 6 (Sub-SLS)</option>
-            <option value="7">Level 7 (Sub2-SLS)</option>
           </select>
         </div>
       </div>
@@ -246,11 +244,6 @@
       <div class="slabel">Local Database</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Results stream directly to IndexedDB. Data persists if the tab closes.</div>
       <button class="btn-clear" id="t2-clear-db">&#128465; Clear DB</button>
-      <hr class="divider">
-      <div style="font-size:10px;color:var(--muted);line-height:1.7;">
-        <strong style="color:var(--text);">Endpoint:</strong><br>
-        <span style="word-break:break-all;color:#475569;">/api/assignments/get-principal-values-by-smallest-code/fd68e454-.../{fullCode}</span>
-      </div>
     </div>
     <div class="panel stats no-br">
       <div class="slabel">Status</div>
@@ -288,11 +281,11 @@
     <div class="panel cfg">
       <div class="slabel">Data Source</div>
       <div class="radio-group">
-        <div class="radio-btn active" id="t3-src-tab2">Tab 2 Results</div>
+        <div class="radio-btn active" id="t3-src-tab2">Assignment List Tab Results</div>
         <div class="radio-btn"       id="t3-src-file">Upload File</div>
       </div>
       <div id="t3-from-tab2">
-        <div class="info-box" id="t3-tab2-info">No Tab 2 results yet.</div>
+        <div class="info-box" id="t3-tab2-info">No Assignment List Tab results yet.</div>
       </div>
       <div id="t3-from-file" style="display:none;">
         <div class="drop-area" id="t3-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">.json .csv .txt — one assignmentId per line/row</span></div>
@@ -323,11 +316,6 @@
       <div class="slabel">Local Database</div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Answers pre-parsed and stored in IndexedDB. CSV streams to disk via Save dialog. XLSX auto-splits at 50K rows per file.</div>
       <button class="btn-clear" id="t3-clear-db">&#128465; Clear DB</button>
-      <hr class="divider">
-      <div style="font-size:10px;color:var(--muted);line-height:1.7;">
-        <strong style="color:var(--text);">Endpoint:</strong><br>
-        <span style="word-break:break-all;color:#475569;">/api/assignment/get-by-assignment-id?assignmentId={id}</span>
-      </div>
     </div>
     <div class="panel stats no-br">
       <div class="slabel">Status</div>
@@ -378,11 +366,6 @@
         <button class="btn btn-start" id="t4-start">&#9654; Start</button>
         <button class="btn btn-stop"  id="t4-stop" disabled>&#9632; Stop</button>
       </div>
-      <hr class="divider">
-      <div style="font-size:10px;color:var(--muted);line-height:1.7;">
-        <strong style="color:var(--text);">Endpoint:</strong><br>
-        <span style="word-break:break-all;color:#475569;">/api/analytic/api/v2/assignment/report-progress-by-responsibility</span>
-      </div>
     </div>
     <div class="panel stats no-br">
       <div class="slabel">Status</div>
@@ -428,6 +411,12 @@
         Looks for an open tab on<br><span style="word-break:break-all;color:#475569;">https://fasih-dashboard.bps.go.id/superset/sqllab</span>,
         closes every open SQL Lab tab there (last to first), then — if a link reference file is loaded below — for each <code>link</code> in order: opens it, clicks <strong>Run</strong>, waits for the results. On a DB engine error it retries the same query up to 3 times before recording it as a failure; on success it clicks <strong>Download to CSV</strong>; either way it then closes the tabs and moves to the next link.
       </div>
+      <div class="slabel">Load Link Reference</div>
+      <div class="hint" style="margin-bottom:6px;">File must have <code>kode</code>, <code>keterangan</code>, and <code>link</code> columns (header names, case-insensitive).</div>
+      <div class="drop-area" id="t5-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">.xlsx .csv .txt</span></div>
+      <input type="file" id="t5-file-input" accept=".xlsx,.xls,.csv,.txt" style="display:none;">
+      <div class="info-box" id="t5-file-info" style="display:none;"></div>
+      <hr class="divider">
       <div class="row2">
         <div class="field"><label>Delay (ms)</label><input id="t5-delay" type="number" value="400" min="0" max="5000" step="50"></div>
       </div>
@@ -435,12 +424,6 @@
         <button class="btn btn-start" id="t5-start">&#9654; Start</button>
         <button class="btn btn-stop"  id="t5-stop" disabled>&#9632; Stop</button>
       </div>
-      <hr class="divider">
-      <div class="slabel">Load Link Reference</div>
-      <div class="hint" style="margin-bottom:6px;">File must have <code>kode</code>, <code>keterangan</code>, and <code>link</code> columns (header names, case-insensitive).</div>
-      <div class="drop-area" id="t5-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">.xlsx .csv .txt</span></div>
-      <input type="file" id="t5-file-input" accept=".xlsx,.xls,.csv,.txt" style="display:none;">
-      <div class="info-box" id="t5-file-info" style="display:none;"></div>
     </div>
     <div class="panel log-p no-br no-bb" style="grid-row:2;">
       <div class="card__label-row" style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">

@@ -360,10 +360,10 @@ async function parseFileToIds(file){
 const T1={
   GROUP_ID:'a45adac1-e711-4c15-b3f9-1f30fc151565',
   BASE:'https://fasih-sm.bps.go.id/app/api/region/api/v1/region',
-  PARAM:{3:'level2FullCode',4:'level3FullCode',5:'level4FullCode',6:'level5FullCode',7:'level6FullCode'},
-  NAMES:{3:'Kecamatan',4:'Desa/Kel',5:'SLS',6:'Sub-SLS',7:'Sub2-SLS'},
+  PARAM:{3:'level2FullCode',4:'level3FullCode',5:'level4FullCode',6:'level5FullCode'},
+  NAMES:{3:'Kecamatan',4:'Desa/Kel',5:'SLS',6:'Sub-SLS'},
   collecting:false,stopped:false,rows:[],errorItems:[],wq:null,timer:null,startMs:0,
-  stats:{req:0,rows:0,err:0,active:0},lcount:{3:0,4:0,5:0,6:0,7:0},
+  stats:{req:0,rows:0,err:0,active:0},lcount:{3:0,4:0,5:0,6:0},
 
   async fetchLevel(level,code,retries=3){
     const url=`${this.BASE}/level${level}?groupId=${this.GROUP_ID}&${this.PARAM[level]}=${code}`;
@@ -385,7 +385,7 @@ const T1={
     const l2=document.getElementById('t1-l2').value.trim(),maxLv=parseInt(document.getElementById('t1-maxlv').value),conc=parseInt(document.getElementById('t1-conc').value)||3,delay=parseInt(document.getElementById('t1-delay').value)||0;
     if(!l2)return alert('Enter a Level 2 Full Code.');
     this.collecting=true;this.stopped=false;this.rows=[];this.errorItems=[];this.stats={req:0,rows:0,err:0,active:0};
-    Object.keys(this.lcount).forEach(k=>this.lcount[k]=0);[3,4,5,6,7].forEach(l=>document.getElementById(`lc${l}`).textContent=0);
+    Object.keys(this.lcount).forEach(k=>this.lcount[k]=0);[3,4,5,6].forEach(l=>document.getElementById(`lc${l}`).textContent=0);
     this.wq=new WorkQueue(conc);clearLog('t1');hideDL('t1');setStatus('t1','running');this.startMs=Date.now();
     this.timer=setInterval(()=>document.getElementById('t1-elapsed').textContent=((Date.now()-this.startMs)/1000|0)+'s',1000);
     this.log(`Start: l2=${l2} maxLv=${maxLv} conc=${conc} delay=${delay}ms`,'s');
@@ -451,7 +451,7 @@ const T2={
   },
   stop(){this.stopped=true;this.log('Stop...','w');document.getElementById('t2-stop').disabled=true;},
   log(msg,cls='i'){addLog('t2',msg,cls);},
-  refreshInfo(){const n=T1.rows.length,el=document.getElementById('t2-tab1-info');el.innerHTML=n>0?`<strong>${n}</strong> rows from Tab 1. Deepest codes: <strong>${T1.getFullCodes('deepest').length}</strong>`:'No Tab 1 results yet.';},
+  refreshInfo(){const n=T1.rows.length,el=document.getElementById('t2-tab1-info');el.innerHTML=n>0?`<strong>${n}</strong> rows from Region Hierarchy Tab. Deepest codes: <strong>${T1.getFullCodes('deepest').length}</strong>`:'No Region Hierarchy Tab results yet.';},
   async loadFile(file){try{this.fileCodes=await parseFileToIds(file);const el=document.getElementById('t2-file-info');el.style.display='block';el.innerHTML=`<strong>${this.fileCodes.length}</strong> codes from <em>${escHtml(file.name)}</em>`;this.log(`Loaded ${this.fileCodes.length} codes`,'s');}catch(e){alert(e.message);}},
 
   T2_HEADERS:['fullCode','assignmentId','data1','data2','data3','data4','data5','data6','data7','data8','data9','data10'],
@@ -461,7 +461,7 @@ const T2={
   async exportCSV(){showExportProgress('Writing CSV to disk (File Save dialog will open)...');try{const n=await DB.exportCSV('t2_results',this.T2_HEADERS,r=>this.rowMapper(r),`assignments_list_${nowTs()}.csv`);this.log(n?`Exported ${n} rows via File Save`:'Export cancelled','s');}catch(e){this.log(`CSV error: ${e.message}`,'r');}finally{hideExportProgress();}},
   async exportXLSX(){showExportProgress('Building XLSX...');try{await DB.exportXLSX('t2_results','Assignment List',this.T2_HEADERS,r=>this.rowMapper(r),`assignments_list`,50000,updateExportProgress);this.log('XLSX export complete','s');}catch(e){this.log(`XLSX error: ${e.message}`,'r');}finally{hideExportProgress();}},
   async exportErrors(){const n=await DB.exportErrorCSV('t2_errors','fullCode',`errors_t2_${nowTs()}.csv`);this.log(n?`Exported ${n} failed fullCodes`:'No errors','s');},
-  async clearDB(){if(!confirm('Clear all Tab 2 data from the local database?'))return;await DB.clear('t2_results');await DB.clear('t2_errors');this._assignmentIds=new Set();hideDL('t2');this.log('DB cleared','w');},
+  async clearDB(){if(!confirm('Clear all Assignment List Tab data from the local database?'))return;await DB.clear('t2_results');await DB.clear('t2_errors');this._assignmentIds=new Set();hideDL('t2');this.log('DB cleared','w');},
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -498,7 +498,7 @@ const T3={
 
   async start(){
     const ids=this.getSourceIds();
-    if(!ids.length){return alert(this.sourceMode==='tab2'?'No assignmentIds from Tab 2.\n\nRun Tab 2 first, or switch source to "Upload File".':'No IDs in uploaded file.');}
+    if(!ids.length){return alert(this.sourceMode==='tab2'?'No assignmentIds from Assignment List Tab.\n\nRun Assignment List Tab first, or switch source to "Upload File".':'No IDs in uploaded file.');}
     const conc=parseInt(document.getElementById('t3-conc').value)||2,delay=parseInt(document.getElementById('t3-delay').value)||0;
     this.collecting=true;this.stopped=false;this.dataKeys=new Set();this.predefKeys=new Set();
     await DB.clear('t3_results');await DB.clear('t3_errors');
@@ -521,7 +521,7 @@ const T3={
   },
   stop(){this.stopped=true;this.log('Stop...','w');document.getElementById('t3-stop').disabled=true;},
   log(msg,cls='i'){addLog('t3',msg,cls);},
-  refreshInfo(){const n=T2.getAssignmentIds().length,el=document.getElementById('t3-tab2-info');el.innerHTML=n>0?`<strong>${n}</strong> unique assignmentIds from Tab 2 (${n} total).`:'No Tab 2 results yet.';},
+  refreshInfo(){const n=T2.getAssignmentIds().length,el=document.getElementById('t3-tab2-info');el.innerHTML=n>0?`<strong>${n}</strong> unique assignmentIds from Assignment List Tab (${n} total).`:'No Assignment List Tab results yet.';},
   async loadFile(file){try{this.fileIds=await parseFileToIds(file);const el=document.getElementById('t3-file-info');el.style.display='block';el.innerHTML=`<strong>${this.fileIds.length}</strong> IDs from <em>${escHtml(file.name)}</em>`;this.log(`Loaded ${this.fileIds.length} IDs`,'s');}catch(e){alert(e.message);}},
 
   getHeaders(){
@@ -573,7 +573,7 @@ const T4={
   DEFAULT_PAYLOAD:{
     surveyPeriodId:'fd68e454-ba45-4b85-8205-f3bf777ded24',
     surveyRoleId:'6d7d919a-45e5-4779-bb87-2905b49fd31a',
-    size:50,page:0,search:'',target:'TARGET_ONLY', // this endpoint's "page" is 0-indexed
+    size:10,page:0,search:'',target:'TARGET_ONLY', // this endpoint's "page" is 0-indexed
     region:{region1Id:null,region2Id:null,region3Id:null,region4Id:null,region5Id:null,region6Id:null,region7Id:null,region8Id:null,region9Id:null,region10Id:null},
     regionSummaryLevel:6
   },
