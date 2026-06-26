@@ -18,14 +18,15 @@
     .vnav-brand .hicon{width:26px;height:26px;font-size:13px;}
     .vnav-brand b{font-size:12px;color:#f1f5f9;}
     .nav-btn{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:9px 14px;background:none;border:none;border-left:3px solid transparent;color:var(--muted);cursor:pointer;font-size:12px;font-weight:500;text-align:left;transition:color .15s,border-color .15s,background .15s;width:100%;}
-    .nav-btn .nb-ico{font-size:14px;margin-right:6px;}
+    .nav-btn .nb-ico{margin-right:6px;display:inline-flex;vertical-align:-3px;}
+    .nav-btn .nb-ico svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
     .nav-btn .nb-sub{font-size:9.5px;color:#475569;font-weight:400;}
     .nav-btn:hover{color:var(--text);background:var(--bg3);}
     .nav-btn.active{color:var(--accent);border-left-color:var(--accent);background:#0c4a6e22;}
     .nav-group{display:flex;flex-direction:column;}
     .nav-group-label{display:flex;align-items:center;gap:6px;padding:10px 14px 4px;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#475569;}
     .nav-group .nav-btn{padding-left:30px;}
-    .nav-group .nav-btn .nb-ico{font-size:12px;}
+    .nav-group .nav-btn .nb-ico svg{width:13px;height:13px;}
     .nav-divider{border:none;border-top:1px solid var(--border);margin:8px 14px;}
     .page{flex:1;display:flex;flex-direction:column;min-height:0;min-width:0;}
     header{background:var(--bg2);border-bottom:1px solid var(--border);padding:9px 18px;display:flex;align-items:center;gap:10px;flex-shrink:0;}
@@ -117,14 +118,15 @@
 <div class="app">
   <nav class="vnav">
     <div class="vnav-brand"><div class="hicon">&#127760;</div><b>Fasih Spider</b></div>
-    <button class="nav-btn active" data-tab="t4"><span><span class="nb-ico">&#128202;</span>Report Progress</span><span class="nb-sub">By responsibility</span></button>
-    <button class="nav-btn"        data-tab="t5"><span><span class="nb-ico">&#128221;</span>SQL Lab</span><span class="nb-sub">Close all tabs</span></button>
+    <button class="nav-btn active" data-tab="t4"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span>Report Progress</span><span class="nb-sub">By responsibility</span></button>
+    <button class="nav-btn"        data-tab="t5"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></span>SQL Lab</span><span class="nb-sub">Close all tabs</span></button>
     <hr class="nav-divider">
-    <div class="nav-group-label">&#128737; Raw Collector</div>
+    <div class="nav-group-label">Raw Collector</div>
     <div class="nav-group">
-      <button class="nav-btn" data-tab="t1"><span><span class="nb-ico">&#127758;</span>Region Hierarchy</span><span class="nb-sub">Level 3&ndash;6 codes</span></button>
-      <button class="nav-btn" data-tab="t2"><span><span class="nb-ico">&#128203;</span>Assignment List</span><span class="nb-sub">By smallest code</span></button>
-      <button class="nav-btn" data-tab="t3"><span><span class="nb-ico">&#128196;</span>Assignment Detail</span><span class="nb-sub">Survey answers</span></button>
+      <button class="nav-btn" data-tab="t1"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg></span>Region Hierarchy</span><span class="nb-sub">Level 3&ndash;6 codes</span></button>
+      <button class="nav-btn" data-tab="t2"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></span>Assignment List</span><span class="nb-sub">By smallest code</span></button>
+      <button class="nav-btn" data-tab="t3"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>Assignment Detail</span><span class="nb-sub">Survey answers</span></button>
+      <button class="nav-btn" data-tab="t6"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span>Assignment Status</span><span class="nb-sub">By region, paginated</span></button>
     </div>
   </nav>
   <div class="page">
@@ -346,6 +348,70 @@
   </div>
 </div>
 
+<!-- ===== TAB 6: Assignment Status — datatable by region ===== -->
+<div class="tab-content" id="t6">
+  <div class="split">
+    <div class="panel cfg">
+      <div class="slabel">Data Source</div>
+      <div class="radio-group">
+        <div class="radio-btn active" id="t6-src-tab1">Region Hierarchy Tab</div>
+        <div class="radio-btn"       id="t6-src-file">Upload File</div>
+      </div>
+      <div id="t6-from-tab1">
+        <div class="info-box" id="t6-tab1-info">No Region Hierarchy results yet.</div>
+      </div>
+      <div id="t6-from-file" style="display:none;">
+        <div class="drop-area" id="t6-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">.json .csv .txt .xlsx &mdash; region1Id..region6Id columns</span></div>
+        <input type="file" id="t6-file-input" accept=".json,.csv,.txt,.xlsx,.xls" style="display:none;">
+        <div class="info-box" id="t6-file-info" style="display:none;"></div>
+      </div>
+      <hr class="divider">
+      <div class="slabel">Settings</div>
+      <div class="field"><label>Survey Period ID</label><input id="t6-survey" type="text" value="fd68e454-ba45-4b85-8205-f3bf777ded24"></div>
+      <div class="row3">
+        <div class="field"><label>Concurrency</label><input id="t6-conc" type="number" value="1" min="1" max="10"></div>
+        <div class="field"><label>Page Length</label><input id="t6-length" type="number" value="10" min="1" max="500"></div>
+        <div class="field"><label>Delay (ms)</label><input id="t6-delay" type="number" value="300" min="0" max="5000" step="50"></div>
+      </div>
+      <div class="hint" style="margin-bottom:9px;">Up to Concurrency region chains run at once; within each chain, every page is still collected before that chain finishes.</div>
+      <div class="btn-row">
+        <button class="btn btn-start" id="t6-start">&#9654; Start</button>
+        <button class="btn btn-stop"  id="t6-stop" disabled>&#9632; Stop</button>
+      </div>
+      <hr class="divider">
+      <div class="slabel">Local Database</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Results stream directly to IndexedDB. Data persists if the tab closes.</div>
+      <button class="btn-clear" id="t6-clear-db">&#128465; Clear DB</button>
+    </div>
+    <div class="panel stats no-br">
+      <div class="slabel">Status</div>
+      <div class="stat-row">
+        <div class="stat">Status: <span id="t6-badge" class="badge idle">Idle</span></div>
+        <div class="stat">Chains: <span id="t6-chains-done">0</span>/<span id="t6-chains-total">0</span></div>
+        <div class="stat">Records: <span id="t6-records">0</span></div>
+        <div class="stat">Errors: <span id="t6-err">0</span></div>
+        <div class="stat">Active: <span id="t6-act">0</span></div>
+        <div class="stat">Elapsed: <span id="t6-elapsed">0s</span></div>
+      </div>
+      <div class="prog-wrap"><div class="prog-bar" id="t6-prog"></div></div>
+    </div>
+    <div class="panel log-p no-br no-bb">
+      <div class="slabel">Activity Log</div>
+      <div class="log-area" id="t6-log-area"></div>
+    </div>
+  </div>
+  <div class="dl-bar" id="t6-dl">
+    <div class="dl-row">
+      <div class="dl-info">Ready: <strong id="t6-dl-count">0</strong> records <span style="font-size:10px;color:var(--muted);">CSV=Save dialog &bull; XLSX=split 50K/file</span></div>
+      <button class="btn btn-exp"      id="t6-json">&#128196; JSON</button>
+      <button class="btn btn-exp csv"  id="t6-csv">&#128202; CSV</button>
+      <button class="btn btn-exp xlsx" id="t6-xlsx">&#128209; XLSX</button>
+      <div class="dl-sep"></div>
+      <button class="btn btn-exp err" id="t6-err-exp" disabled>&#9888; No errors</button>
+    </div>
+  </div>
+</div>
+
 <!-- ===== TAB 4: Report Progress by Responsibility ===== -->
 <div class="tab-content active" id="t4">
   <div class="split">
@@ -379,8 +445,8 @@
       <hr class="divider">
       <div class="slabel">Result</div>
       <div class="info-box" id="t4-result-info">No data collected yet.</div>
-      <div class="slabel" style="margin-top:9px;">Aggregated by iddesa</div>
       <div class="info-box" id="t4-agg-info">No data collected yet.</div>
+      <div class="info-box" id="t4-agg-kec-info">No data collected yet.</div>
     </div>
     <div class="panel log-p no-br no-bb">
       <div class="slabel">Activity Log</div>
@@ -389,15 +455,17 @@
   </div>
   <div class="dl-bar" id="t4-dl">
     <div class="dl-row">
-      <div class="dl-info">Ready: <strong id="t4-dl-count">0</strong> records</div>
+      <div class="field" style="margin:0;min-width:170px;"><label>Download Level</label>
+        <select id="t4-level-sel">
+          <option value="raw" selected>Raw (per region)</option>
+          <option value="iddesa">Aggregated by iddesa</option>
+          <option value="idkec">Aggregated by idkec</option>
+        </select>
+      </div>
+      <div class="dl-info">Ready: <strong id="t4-dl-count">0</strong> <span id="t4-dl-noun">records</span></div>
       <button class="btn btn-exp"      id="t4-json">&#128196; JSON</button>
       <button class="btn btn-exp csv"  id="t4-csv">&#128202; CSV</button>
       <button class="btn btn-exp xlsx" id="t4-xlsx">&#128209; XLSX</button>
-      <div class="dl-sep"></div>
-      <div class="dl-info">Aggregated: <strong id="t4-agg-dl-count">0</strong> villages</div>
-      <button class="btn btn-exp"      id="t4-agg-json">&#128196; JSON</button>
-      <button class="btn btn-exp csv"  id="t4-agg-csv">&#128202; CSV</button>
-      <button class="btn btn-exp xlsx" id="t4-agg-xlsx">&#128209; XLSX</button>
     </div>
   </div>
 </div>

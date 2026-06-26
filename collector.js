@@ -144,12 +144,14 @@ async function buildXLSXFromArray(sheetName, headers, rows, onProgress) {
 // ────────────────────────────────────────────────────────────────────────────
 const DB = {
   _db: null,
-  STORES: ['t2_results','t3_results','t2_errors','t3_errors'],
+  STORES: ['t2_results','t3_results','t2_errors','t3_errors','t6_results'],
 
   async open() {
     if(this._db)return;
     await new Promise((res,rej)=>{
-      const req=indexedDB.open('fasih_collector',1);
+      // Bumped to 2 so onupgradeneeded fires again on existing installs and
+      // creates the new t6_results store alongside the originals.
+      const req=indexedDB.open('fasih_collector',2);
       req.onupgradeneeded=e=>{
         const db=e.target.result;
         for(const s of this.STORES)if(!db.objectStoreNames.contains(s))db.createObjectStore(s,{autoIncrement:true,keyPath:'_iid'});
@@ -393,13 +395,31 @@ const T1={
     clearInterval(this.timer);this.collecting=false;
     const sec=((Date.now()-this.startMs)/1000).toFixed(1);setStatus('t1',this.stopped?'stopped':'done');
     this.log(`Done in ${sec}s — ${this.rows.length} rows, ${this.stats.err} errors.`,this.stopped?'w':'s');
-    T2.refreshInfo();saveStorage('t1data',{level2FullCode:l2,collectedAt:new Date().toISOString(),rows:this.rows});showDL('t1',this.rows.length);
+    T2.refreshInfo();T6.refreshInfo();saveStorage('t1data',{level2FullCode:l2,collectedAt:new Date().toISOString(),rows:this.rows});showDL('t1',this.rows.length);
   },
   stop(){this.stopped=true;this.log('Stop...','w');document.getElementById('t1-stop').disabled=true;},
   log(msg,cls='i'){addLog('t1',msg,cls);},
-  buildHeaders(){const lvls=new Set();for(const r of this.rows)Object.keys(r).forEach(k=>{const n=parseInt(k.replace('level',''));if(n>=3&&n<=7)lvls.add(n);});const sl=[...lvls].sort((a,b)=>a-b),h=[];sl.forEach(l=>h.push(`level${l}_fullCode`,`level${l}_code`,`level${l}_name`));return{headers:h,levels:sl};},
-  toFlat(){const{headers,levels}=this.buildHeaders();return{headers,rows:this.rows.map(row=>{const f={};levels.forEach(l=>{const it=row[`level${l}`]||{};f[`level${l}_fullCode`]=it.fullCode||'';f[`level${l}_code`]=it.code||'';f[`level${l}_name`]=it.name||'';});return f;})};},
+  // Our level numbers already match the Report Progress payload's
+  // region1Id..region10Id numbering (level3=Kecamatan=region3, etc.), so the
+  // fetched item's own "id" is surfaced as regionNId — ready to paste
+  // straight into that payload's region filter.
+  buildHeaders(){const lvls=new Set();for(const r of this.rows)Object.keys(r).forEach(k=>{const n=parseInt(k.replace('level',''));if(n>=3&&n<=7)lvls.add(n);});const sl=[...lvls].sort((a,b)=>a-b),h=[];sl.forEach(l=>h.push(`level${l}_fullCode`,`level${l}_code`,`level${l}_name`,`region${l}Id`));return{headers:h,levels:sl};},
+  toFlat(){const{headers,levels}=this.buildHeaders();return{headers,rows:this.rows.map(row=>{const f={};levels.forEach(l=>{const it=row[`level${l}`]||{};f[`level${l}_fullCode`]=it.fullCode||'';f[`level${l}_code`]=it.code||'';f[`level${l}_name`]=it.name||'';f[`region${l}Id`]=it.id??'';});return f;})};},
   getFullCodes(pref='deepest'){const c=new Set();for(const r of this.rows){if(pref==='deepest'){for(let l=7;l>=3;l--){if(r[`level${l}`]){c.add(r[`level${l}`].fullCode);break;}}}else{const lv=parseInt(pref);if(r[`level${lv}`])c.add(r[`level${lv}`].fullCode);}}return[...c];},
+  // One entry per unique region-id chain, using each row's deepest
+  // available level (rows can stop short of maxLv when a branch has no
+  // children). Deduped since multiple rows can share the same leaf.
+  getDeepestRegionChains(){
+    const seen=new Map();
+    for(const r of this.rows){
+      const chain={};let deepest=null;
+      for(let l=3;l<=6;l++){const it=r[`level${l}`];if(it){chain[l]=it.id??null;deepest=l;}}
+      if(deepest===null)continue;
+      const key=JSON.stringify(chain);
+      if(!seen.has(key))seen.set(key,{chain,deepest});
+    }
+    return[...seen.values()];
+  },
   exportJSON(){if(!this.rows.length)return alert('No data.');downloadBlob(new Blob([JSON.stringify({collectedAt:new Date().toISOString(),totalRows:this.rows.length,data:this.rows},null,2)],{type:'application/json'}),`region_${nowTs()}.json`);this.log('Exported JSON','s');},
   async exportCSV(){if(!this.rows.length)return alert('No data.');const{headers,rows}=this.toFlat();showExportProgress('Writing CSV...');try{const csv=buildCSV(headers,rows);downloadBlob(new Blob([csv],{type:'text/csv;charset=utf-8'}),`region_${nowTs()}.csv`);}finally{hideExportProgress();}this.log('Exported CSV','s');},
   async exportXLSX(){if(!this.rows.length)return alert('No data.');const{headers,rows}=this.toFlat();showExportProgress('Building XLSX...');try{const xlsx=await buildXLSXFromArray('Region Hierarchy',headers,rows,(d,t)=>updateExportProgress(d,t));if(!exportCancelled)downloadBlob(new Blob([xlsx],{type:XLSX_MIME}),`region_${nowTs()}.xlsx`);}finally{hideExportProgress();}this.log('Exported XLSX','s');},
@@ -556,6 +576,201 @@ const T3={
   async exportErrors(){const n=await DB.exportErrorCSV('t3_errors','assignmentId',`errors_t3_${nowTs()}.csv`);this.log(n?`Exported ${n} failed assignmentIds`:'No errors','s');},
   async clearDB(){if(!confirm('Clear all Tab 3 data from the local database?'))return;await DB.clear('t3_results');await DB.clear('t3_errors');this.dataKeys=new Set();this.predefKeys=new Set();hideDL('t3');this.log('DB cleared','w');},
 };
+
+// ────────────────────────────────────────────────────────────────────────────
+// TAB 6: Assignment Status — DataTables-style POST, driven by the unique
+// region-id chains from the Region Hierarchy tab. For each chain, every
+// page is collected (start/length) before moving to the next chain — runs
+// strictly sequentially across chains too, by request, rather than
+// concurrently like Tabs 2/3, since the requirement is "finish one region
+// before starting the next."
+// ────────────────────────────────────────────────────────────────────────────
+const T6={
+  ENDPOINT:'https://fasih-sm.bps.go.id/app/api/analytic/api/v2/assignment/datatable-all-user-survey-periode',
+  MAX_RETRIES:4,RETRY_BASE_DELAY_MS:1500,RETRYABLE_STATUSES:[429,500,502,503,504],
+  running:false,stopped:false,errorItems:[],wq:null,sourceMode:'tab1',fileChains:[],
+  stats:{chainsTotal:0,chainsDone:0,records:0,err:0,active:0},timer:null,startMs:0,
+
+  log(msg,cls='i'){addLog('t6',msg,cls);},
+
+  refreshInfo(){
+    const n=T1.rows.length,el=document.getElementById('t6-tab1-info');
+    if(n>0){const chains=T1.getDeepestRegionChains().length;el.innerHTML=`<strong>${n}</strong> rows from Region Hierarchy Tab &mdash; <strong>${chains}</strong> unique region chain${chains===1?'':'s'} to collect.`;}
+    else el.innerHTML='No Region Hierarchy results yet.';
+  },
+  getSourceChains(){return this.sourceMode==='tab1'?T1.getDeepestRegionChains():this.fileChains;},
+  async loadFile(file){
+    try{
+      const chains=await parseRegionIdChainsFile(file);
+      this.fileChains=chains;
+      const info=document.getElementById('t6-file-info');
+      info.style.display='block';
+      info.innerHTML=`<strong>${chains.length}</strong> region chain${chains.length===1?'':'s'} loaded from <em>${escHtml(file.name)}</em>`;
+      this.log(`Loaded ${chains.length} region chains from ${file.name}`,'s');
+    }catch(e){
+      const info=document.getElementById('t6-file-info');
+      info.style.display='block';
+      info.innerHTML=`<strong style="color:var(--red);">Failed to load:</strong> ${escHtml(e.message)}`;
+      this.log(`File load error: ${e.message}`,'r');
+    }
+  },
+
+  buildPayload(chain,start,length,surveyPeriodId){
+    const region={};
+    for(let l=1;l<=6;l++)region[`region${l}Id`]=chain[l]??null;
+    const dataCols=Array.from({length:10},(_,i)=>({data:`data${i+1}`,orderable:true}));
+    return{
+      start,length,
+      columns:[{data:'id',orderable:true},{data:'codeIdentity',orderable:true},...dataCols],
+      order:[],
+      search:{value:'',regex:false},
+      assignmentExtraParam:{...region,surveyPeriodId,assignmentErrorStatusType:-1,filterTargetType:'TARGET_ONLY'}
+    };
+  },
+
+  // This endpoint's actual shape is {searchData:[...], ...} — not the plain
+  // DataTables {data:[...]} convention, and not the {success,data:{...}}
+  // wrap most other endpoints in this app use either. Check all of them.
+  extractRows(res){
+    const directKeys=['searchData','data','content','items','rows','list'];
+    for(const key of directKeys)if(Array.isArray(res?.[key]))return res[key];
+    for(const key of directKeys)if(Array.isArray(res?.data?.[key]))return res.data[key];
+    return[];
+  },
+  extractTotal(res){
+    const keys=['recordsFiltered','recordsTotal','totalRecords','totalElements','total','count'];
+    for(const key of keys){
+      if(typeof res?.[key]==='number')return res[key];
+      if(typeof res?.data?.[key]==='number')return res.data[key];
+    }
+    return null;
+  },
+
+  async fetchPage(payload){
+    let attempt=0;
+    while(true){
+      let res;
+      try{
+        const r=await fetch(this.ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json',...await T4.csrfHeaders()},credentials:'include',body:JSON.stringify(payload)});
+        if(!r.ok){let bodyText='';try{bodyText=(await r.text()).slice(0,300);}catch(_){}throw Object.assign(new Error(`HTTP ${r.status} ${r.statusText}`),{status:r.status,bodyText});}
+        res=await r.json();
+      }catch(e){
+        const status=e.status??null;
+        const retryable=status===null||this.RETRYABLE_STATUSES.includes(status);
+        attempt++;
+        if(!retryable||attempt>this.MAX_RETRIES)throw e;
+        const delay=this.RETRY_BASE_DELAY_MS*2**(attempt-1);
+        this.log(`${e.message}, retrying (${attempt}/${this.MAX_RETRIES}) in ${Math.round(delay/1000)}s...`,'r');
+        await sleep(delay);
+        continue;
+      }
+      return res;
+    }
+  },
+
+  flattenChain(chain){const out={};for(const[lvl,id]of Object.entries(chain))out[`region${lvl}Id`]=id;return out;},
+
+  // Pages through one region chain to exhaustion before returning.
+  async collectChain(chainInfo,length,delay,surveyPeriodId){
+    let start=0,total=null,collected=0;
+    while(true){
+      if(this.stopped)return;
+      const payload=this.buildPayload(chainInfo.chain,start,length,surveyPeriodId);
+      let res;
+      try{res=await this.fetchPage(payload);}
+      catch(e){
+        this.stats.err++;updateErrBtn('t6',this.errorItems.length+1);
+        this.errorItems.push({...this.flattenChain(chainInfo.chain),start,message:e.message});
+        this.log(`ERR chain=${JSON.stringify(chainInfo.chain)} start=${start}: ${e.message}`,'r');
+        return;
+      }
+      const rows=this.extractRows(res);
+      for(const row of rows){await DB.add('t6_results',{...row,...this.flattenChain(chainInfo.chain)});}
+      collected+=rows.length;this.stats.records+=rows.length;
+      updateStatsT6();
+      if(total===null)total=this.extractTotal(res);
+      const reachedTotal=total!==null&&collected>=total;
+      const emptyPage=rows.length===0;
+      const shortPage=rows.length>0&&rows.length<length&&total===null;
+      if(reachedTotal||emptyPage||shortPage)return;
+      start+=length;
+      await sleep(delay);
+    }
+  },
+
+  async start(){
+    if(this.running)return;
+    const chains=this.getSourceChains();
+    if(!chains.length){this.log(this.sourceMode==='tab1'?'No region chains found — run the Region Hierarchy tab first.':'No region chains loaded — upload a file first.','r');return;}
+    const conc=parseInt(document.getElementById('t6-conc').value)||1;
+    const length=parseInt(document.getElementById('t6-length').value)||10;
+    const delay=parseInt(document.getElementById('t6-delay').value)||0;
+    const surveyPeriodId=document.getElementById('t6-survey').value.trim()||T4.DEFAULT_PAYLOAD.surveyPeriodId;
+
+    this.running=true;this.stopped=false;this.errorItems=[];
+    this.stats={chainsTotal:chains.length,chainsDone:0,records:0,err:0,active:0};
+    await DB.clear('t6_results');
+    this.wq=new WorkQueue(conc);
+    clearLog('t6');hideDL('t6');setStatusT6('running');updateErrBtn('t6',0);this.startMs=Date.now();
+    this.timer=setInterval(()=>document.getElementById('t6-elapsed').textContent=((Date.now()-this.startMs)/1000|0)+'s',1000);
+    document.getElementById('t6-start').disabled=true;document.getElementById('t6-stop').disabled=false;
+    this.log(`Start: ${chains.length} unique region chain(s), concurrency=${conc}, page length=${length}`,'s');
+    updateStatsT6();
+
+    // Each worker still pages one chain to exhaustion before picking up the
+    // next — concurrency is across chains, never within a single chain.
+    await Promise.all(chains.map(chainInfo=>this.wq.run(async()=>{
+      if(this.stopped)return;
+      this.stats.active++;updateStatsT6();
+      this.log(`Region chain (deepest level ${chainInfo.deepest}): ${JSON.stringify(chainInfo.chain)}`,'i');
+      await this.collectChain(chainInfo,length,delay,surveyPeriodId);
+      this.stats.active--;this.stats.chainsDone++;
+      updateStatsT6();
+    })));
+    if(this.stopped)this.log('Stopped by user.','w');
+
+    clearInterval(this.timer);this.running=false;
+    document.getElementById('t6-start').disabled=false;document.getElementById('t6-stop').disabled=true;
+    const total=await DB.count('t6_results');
+    setStatusT6(this.stopped?'stopped':'done');
+    this.log(`Done — ${total} rows in DB across ${this.stats.chainsDone}/${chains.length} chains, ${this.stats.err} chain error${this.stats.err===1?'':'s'}.`,this.stopped?'w':'s');
+    showDL('t6',total);
+  },
+  stop(){this.stopped=true;this.log('Stop requested...','w');document.getElementById('t6-stop').disabled=true;},
+
+  T6_HEADERS:['region1Id','region2Id','region3Id','region4Id','region5Id','region6Id','id','codeIdentity','data1','data2','data3','data4','data5','data6','data7','data8','data9','data10','assignmentStatusId','assignmentStatusAlias','strata','currentUserFullname','currentUserUsername','currentUserSurveyRoleName','dateCreated','dateModified'],
+  rowMapper(rec){const f={};this.T6_HEADERS.forEach(h=>f[h]=String(rec[h]??''));return f;},
+
+  exportJSON(){this.log('JSON export not supported for large DB datasets — use CSV or XLSX.','w');alert('Use CSV or XLSX export for DB-backed data.');},
+  async exportCSV(){showExportProgress('Writing CSV to disk (File Save dialog will open)...');try{const n=await DB.exportCSV('t6_results',this.T6_HEADERS,r=>this.rowMapper(r),`assignment_status_${nowTs()}.csv`);this.log(n?`Exported ${n} rows via File Save`:'Export cancelled','s');}catch(e){this.log(`CSV error: ${e.message}`,'r');}finally{hideExportProgress();}},
+  async exportXLSX(){showExportProgress('Building XLSX...');try{await DB.exportXLSX('t6_results','Assignment Status',this.T6_HEADERS,r=>this.rowMapper(r),`assignment_status`,50000,updateExportProgress);this.log('XLSX export complete','s');}catch(e){this.log(`XLSX error: ${e.message}`,'r');}finally{hideExportProgress();}},
+  // region1Id..region6Id columns mean this file can be re-uploaded directly
+  // as the "Upload File" source below to retry just the chains that failed.
+  exportErrors(){
+    if(!this.errorItems.length)return;
+    const headers=['region1Id','region2Id','region3Id','region4Id','region5Id','region6Id','start','message'];
+    downloadBlob(new Blob([buildCSV(headers,this.errorItems)],{type:'text/csv;charset=utf-8'}),`errors_t6_${nowTs()}.csv`);
+    this.log(`Exported ${this.errorItems.length} chain error entries`,'s');
+  },
+  async clearDB(){if(!confirm('Clear all Assignment Status data from the local database?'))return;await DB.clear('t6_results');this.errorItems=[];hideDL('t6');updateErrBtn('t6',0);this.log('DB cleared','w');},
+};
+function setStatusT6(state){
+  const b=document.getElementById('t6-badge');
+  b.textContent={idle:'Idle',running:'Running',done:'Done',stopped:'Stopped'}[state]||state;
+  b.className=`badge ${state}`;
+  document.getElementById('t6-start').disabled=state==='running';
+  document.getElementById('t6-stop').disabled=state!=='running';
+}
+function updateStatsT6(){
+  const s=T6.stats;
+  document.getElementById('t6-chains-done').textContent=s.chainsDone;
+  document.getElementById('t6-chains-total').textContent=s.chainsTotal;
+  document.getElementById('t6-records').textContent=s.records;
+  document.getElementById('t6-err').textContent=s.err;
+  document.getElementById('t6-act').textContent=s.active;
+  const p=document.getElementById('t6-prog');
+  if(p)p.style.width=(s.chainsTotal>0?s.chainsDone/s.chainsTotal*100:0)+'%';
+}
 
 // ────────────────────────────────────────────────────────────────────────────
 // TAB 4: Report Progress by Responsibility — paginated collector with
@@ -726,8 +941,10 @@ const T4={
       document.getElementById('t4-result-info').innerHTML=`<strong>${this.collected.length}</strong> records collected.`;
       const aggRows=this.aggregateByIddesa();
       document.getElementById('t4-agg-info').innerHTML=`<strong>${aggRows.length}</strong> villages (iddesa).`;
+      const aggKecRows=this.aggregateByIdkec();
+      document.getElementById('t4-agg-kec-info').innerHTML=`<strong>${aggKecRows.length}</strong> kecamatan (idkec).`;
       showDL('t4',this.collected.length);
-      document.getElementById('t4-agg-dl-count').textContent=aggRows.length;
+      this.updateDlSummary();
     }
   },
   stop(){this.stopped=true;this.log('Stop requested...','w');document.getElementById('t4-stop').disabled=true;},
@@ -765,30 +982,101 @@ const T4={
     }
     return rows;
   },
-  buildExportRows(){return this.explodeRegionSummary().map(r=>this.flattenObject(r));},
-  aggregateByIddesa(){
+  // total_assignment = every status in the list; submitted = everything
+  // except OPEN and DRAFT; progress = everything except OPEN (DRAFT still
+  // counts as "in progress"). Applied uniformly at every aggregation level
+  // (raw, iddesa, idkec) since they all share the same status.* column
+  // shape. Named "total_assignment" (not "total") since "total" is already
+  // the API's own per-record field.
+  TOTAL_STATUS_KEYS:['status.OPEN','status.SUBMITTED BY Pencacah','status.DRAFT','status.APPROVED BY Pengawas','status.REJECTED BY Pengawas','status.EDITED BY Pengawas','status.REVOKED BY Pengawas','status.SUBMITTED RESPONDENT','status.REJECTED BY Admin Kabupaten'],
+  SUBMITTED_STATUS_KEYS:['status.SUBMITTED BY Pencacah','status.APPROVED BY Pengawas','status.REJECTED BY Pengawas','status.EDITED BY Pengawas','status.REVOKED BY Pengawas','status.SUBMITTED RESPONDENT','status.REJECTED BY Admin Kabupaten'],
+  PROGRESS_STATUS_KEYS:['status.SUBMITTED BY Pencacah','status.DRAFT','status.APPROVED BY Pengawas','status.REJECTED BY Pengawas','status.EDITED BY Pengawas','status.REVOKED BY Pengawas','status.SUBMITTED RESPONDENT','status.REJECTED BY Admin Kabupaten'],
+  COMPUTED_COLS:['total_assignment','submitted','submitted_percentage','progress','progress_percentage'],
+  statusSum(row,keys){return keys.reduce((s,k)=>s+(Number(row[k])||0),0);},
+  addStatusAggregates(row){
+    const total=this.statusSum(row,this.TOTAL_STATUS_KEYS);
+    const submitted=this.statusSum(row,this.SUBMITTED_STATUS_KEYS);
+    const progress=this.statusSum(row,this.PROGRESS_STATUS_KEYS);
+    row.total_assignment=total;
+    row.submitted=submitted;
+    row.submitted_percentage=total>0?Number((submitted/total*100).toFixed(2)):0;
+    row.progress=progress;
+    row.progress_percentage=total>0?Number((progress/total*100).toFixed(2)):0;
+    return row;
+  },
+  buildExportRows(){return this.explodeRegionSummary().map(r=>this.addStatusAggregates(this.flattenObject(r)));},
+  // Generic prefix-of-regionCode rollup — iddesa is the first 10 digits
+  // (province+regency+district+village), idkec is the first 7
+  // (province+regency+district). regionTotal and every status.* column sum
+  // across whichever regionCode entries share that prefix.
+  aggregateByPrefix(prefixLen,keyName){
     const rows=this.buildExportRows();
     const groups=new Map(),order=[];
     for(const row of rows){
       const regionCode=row.regionCode;
-      const iddesa=regionCode?String(regionCode).slice(0,10):'(unassigned)';
-      if(!groups.has(iddesa)){groups.set(iddesa,{iddesa,regionCodeCount:0,regionTotal:0});order.push(iddesa);}
-      const agg=groups.get(iddesa);
+      const keyVal=regionCode?String(regionCode).slice(0,prefixLen):'(unassigned)';
+      if(!groups.has(keyVal)){groups.set(keyVal,{[keyName]:keyVal,regionCodeCount:0,regionTotal:0});order.push(keyVal);}
+      const agg=groups.get(keyVal);
       if(regionCode)agg.regionCodeCount+=1;
       agg.regionTotal+=Number(row.regionTotal)||0;
       for(const[key,value]of Object.entries(row))if(key.startsWith('status.'))agg[key]=(agg[key]||0)+(Number(value)||0);
     }
-    return order.map(key=>groups.get(key));
+    return order.map(key=>this.addStatusAggregates(groups.get(key)));
   },
-  headerUnion(rows){const s=new Set();rows.forEach(r=>Object.keys(r).forEach(k=>s.add(k)));return[...s];},
+  aggregateByIddesa(){return this.aggregateByPrefix(10,'iddesa');},
+  aggregateByIdkec(){return this.aggregateByPrefix(7,'idkec');},
+  // Computed columns are pulled out and appended last regardless of where
+  // they fall in each row's own key order, so they consistently land at
+  // the end of the exported header row.
+  headerUnion(rows){
+    const s=new Set();
+    rows.forEach(r=>Object.keys(r).forEach(k=>{if(!this.COMPUTED_COLS.includes(k))s.add(k);}));
+    const present=this.COMPUTED_COLS.filter(c=>rows.some(r=>c in r));
+    return[...s,...present];
+  },
 
-  exportJSON(){if(!this.collected.length)return alert('No data.');downloadBlob(new Blob([JSON.stringify(this.collected,null,2)],{type:'application/json'}),`report_progress_${nowTs()}.json`);this.log('Exported JSON','s');},
-  exportCSV(){if(!this.collected.length)return alert('No data.');const rows=this.buildExportRows(),headers=this.headerUnion(rows);downloadBlob(new Blob([buildCSV(headers,rows)],{type:'text/csv;charset=utf-8'}),`report_progress_${nowTs()}.csv`);this.log('Exported CSV','s');},
-  async exportXLSX(){if(!this.collected.length)return alert('No data.');const rows=this.buildExportRows(),headers=this.headerUnion(rows);showExportProgress('Building XLSX...');try{const xlsx=await buildXLSXFromArray('Report Progress',headers,rows,(d,t)=>updateExportProgress(d,t));if(!exportCancelled)downloadBlob(new Blob([xlsx],{type:XLSX_MIME}),`report_progress_${nowTs()}.xlsx`);}finally{hideExportProgress();}this.log('Exported XLSX','s');},
+  // Single dropdown (#t4-level-sel) picks which level JSON/CSV/XLSX export.
+  LEVEL_META:{
+    raw:{noun:'records',sheet:'Report Progress',base:'report_progress'},
+    iddesa:{noun:'villages',sheet:'By iddesa',base:'report_progress_by_iddesa'},
+    idkec:{noun:'kecamatan',sheet:'By idkec',base:'report_progress_by_idkec'}
+  },
+  selectedLevel(){return document.getElementById('t4-level-sel').value;},
+  levelRows(level){
+    if(level==='iddesa')return this.aggregateByIddesa();
+    if(level==='idkec')return this.aggregateByIdkec();
+    return this.buildExportRows();
+  },
+  updateDlSummary(){
+    if(!this.collected.length)return;
+    const level=this.selectedLevel(),meta=this.LEVEL_META[level];
+    document.getElementById('t4-dl-count').textContent=this.levelRows(level).length;
+    document.getElementById('t4-dl-noun').textContent=meta.noun;
+  },
 
-  exportAggJSON(){if(!this.collected.length)return alert('No data.');downloadBlob(new Blob([JSON.stringify(this.aggregateByIddesa(),null,2)],{type:'application/json'}),`report_progress_by_iddesa_${nowTs()}.json`);this.log('Exported aggregated JSON','s');},
-  exportAggCSV(){if(!this.collected.length)return alert('No data.');const rows=this.aggregateByIddesa(),headers=this.headerUnion(rows);downloadBlob(new Blob([buildCSV(headers,rows)],{type:'text/csv;charset=utf-8'}),`report_progress_by_iddesa_${nowTs()}.csv`);this.log('Exported aggregated CSV','s');},
-  async exportAggXLSX(){if(!this.collected.length)return alert('No data.');const rows=this.aggregateByIddesa(),headers=this.headerUnion(rows);showExportProgress('Building XLSX...');try{const xlsx=await buildXLSXFromArray('By iddesa',headers,rows,(d,t)=>updateExportProgress(d,t));if(!exportCancelled)downloadBlob(new Blob([xlsx],{type:XLSX_MIME}),`report_progress_by_iddesa_${nowTs()}.xlsx`);}finally{hideExportProgress();}this.log('Exported aggregated XLSX','s');},
+  exportJSON(){
+    if(!this.collected.length)return alert('No data.');
+    const level=this.selectedLevel(),meta=this.LEVEL_META[level];
+    const data=level==='raw'?this.collected:this.levelRows(level);
+    downloadBlob(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),`${meta.base}_${nowTs()}.json`);
+    this.log(`Exported ${meta.noun} JSON`,'s');
+  },
+  exportCSV(){
+    if(!this.collected.length)return alert('No data.');
+    const level=this.selectedLevel(),meta=this.LEVEL_META[level];
+    const rows=this.levelRows(level),headers=this.headerUnion(rows);
+    downloadBlob(new Blob([buildCSV(headers,rows)],{type:'text/csv;charset=utf-8'}),`${meta.base}_${nowTs()}.csv`);
+    this.log(`Exported ${meta.noun} CSV`,'s');
+  },
+  async exportXLSX(){
+    if(!this.collected.length)return alert('No data.');
+    const level=this.selectedLevel(),meta=this.LEVEL_META[level];
+    const rows=this.levelRows(level),headers=this.headerUnion(rows);
+    showExportProgress('Building XLSX...');
+    try{const xlsx=await buildXLSXFromArray(meta.sheet,headers,rows,(d,t)=>updateExportProgress(d,t));if(!exportCancelled)downloadBlob(new Blob([xlsx],{type:XLSX_MIME}),`${meta.base}_${nowTs()}.xlsx`);}
+    finally{hideExportProgress();}
+    this.log(`Exported ${meta.noun} XLSX`,'s');
+  },
 };
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -1095,29 +1383,32 @@ function renderLinkTable(rows){
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Minimal file parser for the "kode / keterangan / link" reference sheet.
-// Handles .csv/.txt directly; for .xlsx it unzips and parses the worksheet
-// XML by hand (no SheetJS bundled), since this project only ever needed to
-// *write* xlsx until now (see buildXLSXFromArray above).
+// Minimal file parsers — .csv/.txt directly; for .xlsx it unzips and parses
+// the worksheet XML by hand (no SheetJS bundled), since this project only
+// ever needed to *write* xlsx until now (see buildXLSXFromArray above).
 // ────────────────────────────────────────────────────────────────────────────
-async function parseKodeKeteranganLinkFile(file){
+async function readTableFromFile(file){
   const ext=file.name.split('.').pop().toLowerCase();
-  let table;
-  if(ext==='xlsx'||ext==='xls'){
-    table=await parseXlsxToTable(await file.arrayBuffer());
-  }else{
-    table=parseDelimitedText(await file.text());
-  }
+  const table=(ext==='xlsx'||ext==='xls')?await parseXlsxToTable(await file.arrayBuffer()):parseDelimitedText(await file.text());
   if(!table.length)throw new Error('File is empty.');
+  return table;
+}
 
-  const headerRow=table[0].map(h=>String(h??'').trim().toLowerCase());
-  const need=['kode','keterangan','link'];
+function requireColumns(headerRow,names){
   const colIdx={};
-  for(const name of need){
+  for(const name of names){
     const idx=headerRow.indexOf(name);
     if(idx===-1)throw new Error(`Missing required column "${name}". Found: ${headerRow.filter(Boolean).join(', ')||'(no header row detected)'}`);
     colIdx[name]=idx;
   }
+  return colIdx;
+}
+
+// The "kode / keterangan / link" reference sheet (SQL Lab tab).
+async function parseKodeKeteranganLinkFile(file){
+  const table=await readTableFromFile(file);
+  const headerRow=table[0].map(h=>String(h??'').trim().toLowerCase());
+  const colIdx=requireColumns(headerRow,['kode','keterangan','link']);
   const out=[];
   for(let i=1;i<table.length;i++){
     const r=table[i];
@@ -1127,6 +1418,32 @@ async function parseKodeKeteranganLinkFile(file){
       keterangan:String(r[colIdx.keterangan]??'').trim(),
       link:String(r[colIdx.link]??'').trim()
     });
+  }
+  return out;
+}
+
+// A region-id chain sheet (Assignment Status tab) — at least one of
+// region1Id..region6Id, same shape T1.getDeepestRegionChains() produces, so
+// this can come straight from a previously exported error CSV to retry just
+// the failed chains.
+async function parseRegionIdChainsFile(file){
+  const table=await readTableFromFile(file);
+  const headerRow=table[0].map(h=>String(h??'').trim().toLowerCase());
+  const colIdx={};
+  for(let l=1;l<=6;l++){const idx=headerRow.indexOf(`region${l}id`);if(idx!==-1)colIdx[l]=idx;}
+  if(!Object.keys(colIdx).length)throw new Error(`No region1Id..region6Id columns found. Found: ${headerRow.filter(Boolean).join(', ')||'(no header row detected)'}`);
+
+  const out=[];
+  for(let i=1;i<table.length;i++){
+    const r=table[i];
+    if(!r||r.every(v=>v===undefined||v===null||v===''))continue;
+    const chain={};let deepest=null;
+    for(const[l,idx]of Object.entries(colIdx)){
+      const val=String(r[idx]??'').trim();
+      if(val){chain[Number(l)]=val;deepest=Math.max(deepest??0,Number(l));}
+    }
+    if(deepest===null)continue;
+    out.push({chain,deepest});
   }
   return out;
 }
@@ -1230,7 +1547,7 @@ function setStatus5(state){
 // ────────────────────────────────────────────────────────────────────────────
 // Shared UI helpers
 // ────────────────────────────────────────────────────────────────────────────
-const LOG_BUF={t1:[],t2:[],t3:[],t4:[],t5:[]};
+const LOG_BUF={t1:[],t2:[],t3:[],t4:[],t5:[],t6:[]};
 function addLog(tab,msg,cls='i'){const ts=new Date().toLocaleTimeString('en-GB');LOG_BUF[tab].unshift({ts,msg,cls});if(LOG_BUF[tab].length>300)LOG_BUF[tab].length=300;renderLog(tab);}
 function clearLog(tab){LOG_BUF[tab]=[];renderLog(tab);}
 function renderLog(tab){const el=document.getElementById(`${tab}-log-area`);if(!el)return;el.innerHTML=LOG_BUF[tab].map(e=>`<div class="le l${e.cls}"><span class="lts">${e.ts}</span>${escHtml(e.msg)}</div>`).join('');}
@@ -1252,8 +1569,8 @@ function loadStorage(){
     const{level2FullCode,collectedAt,rows}=res.t1data;T1.rows=rows;T1.stats.rows=rows.length;
     const prev=document.getElementById('t1-prev');prev.style.display='block';
     document.getElementById('t1-prev-info').textContent=`Previous: ${level2FullCode} — ${rows.length} rows (${new Date(collectedAt).toLocaleString()})`;
-    document.getElementById('t1-load-prev').onclick=()=>{showDL('t1',rows.length);T2.refreshInfo();addLog('t1',`Loaded ${rows.length} rows from storage`,'s');};
-    T2.refreshInfo();
+    document.getElementById('t1-load-prev').onclick=()=>{showDL('t1',rows.length);T2.refreshInfo();T6.refreshInfo();addLog('t1',`Loaded ${rows.length} rows from storage`,'s');};
+    T2.refreshInfo();T6.refreshInfo();
   });}catch(_){}
 }
 
@@ -1264,7 +1581,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   await DB.open();// initialise IndexedDB first
 
   // Restore DB counts on load
-  for(const tab of['t2','t3']){
+  for(const tab of['t2','t3','t6']){
     const store=`${tab}_results`;
     const n=await DB.count(store);
     if(n>0){showDL(tab,n);addLog(tab,`Found ${n} rows in local database from previous session.`,'s');}
@@ -1275,7 +1592,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
     btn.classList.add('active');document.getElementById(btn.dataset.tab).classList.add('active');
-    if(btn.dataset.tab==='t2')T2.refreshInfo();if(btn.dataset.tab==='t3')T3.refreshInfo();
+    if(btn.dataset.tab==='t2')T2.refreshInfo();if(btn.dataset.tab==='t3')T3.refreshInfo();if(btn.dataset.tab==='t6')T6.refreshInfo();
   }));
 
   document.getElementById('exp-cancel').addEventListener('click',()=>{exportCancelled=true;hideExportProgress();});
@@ -1306,6 +1623,15 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('t3-err-exp').addEventListener('click',()=>T3.exportErrors());
   document.getElementById('t3-clear-db').addEventListener('click',()=>T3.clearDB());
 
+  // Tab 6
+  document.getElementById('t6-start').addEventListener('click',()=>{if(!T6.running)T6.start();});
+  document.getElementById('t6-stop').addEventListener('click',()=>T6.stop());
+  document.getElementById('t6-json').addEventListener('click',()=>T6.exportJSON());
+  document.getElementById('t6-csv').addEventListener('click',()=>T6.exportCSV());
+  document.getElementById('t6-xlsx').addEventListener('click',()=>T6.exportXLSX());
+  document.getElementById('t6-err-exp').addEventListener('click',()=>T6.exportErrors());
+  document.getElementById('t6-clear-db').addEventListener('click',()=>T6.clearDB());
+
   function makeSourceToggle(srcBtnId,fileBtnId,fromSrcId,fromFileId,obj,primaryMode,dropId,inputId){
     document.getElementById(srcBtnId).addEventListener('click',()=>{obj.sourceMode=primaryMode;document.getElementById(srcBtnId).classList.add('active');document.getElementById(fileBtnId).classList.remove('active');document.getElementById(fromSrcId).style.display='';document.getElementById(fromFileId).style.display='none';});
     document.getElementById(fileBtnId).addEventListener('click',()=>{obj.sourceMode='file';document.getElementById(fileBtnId).classList.add('active');document.getElementById(srcBtnId).classList.remove('active');document.getElementById(fromFileId).style.display='';document.getElementById(fromSrcId).style.display='none';});
@@ -1318,6 +1644,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   }
   makeSourceToggle('t2-src-tab1','t2-src-file','t2-from-tab1','t2-from-file',T2,'tab1','t2-drop','t2-file-input');
   makeSourceToggle('t3-src-tab2','t3-src-file','t3-from-tab2','t3-from-file',T3,'tab2','t3-drop','t3-file-input');
+  makeSourceToggle('t6-src-tab1','t6-src-file','t6-from-tab1','t6-from-file',T6,'tab1','t6-drop','t6-file-input');
 
   document.getElementById('t3-mode-data').addEventListener('click',()=>{T3.exportMode='data';document.getElementById('t3-mode-data').classList.add('active');document.getElementById('t3-mode-predef').classList.remove('active');});
   document.getElementById('t3-mode-predef').addEventListener('click',()=>{T3.exportMode='predef';document.getElementById('t3-mode-predef').classList.add('active');document.getElementById('t3-mode-data').classList.remove('active');});
@@ -1337,9 +1664,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('t4-json').addEventListener('click',()=>T4.exportJSON());
   document.getElementById('t4-csv').addEventListener('click',()=>T4.exportCSV());
   document.getElementById('t4-xlsx').addEventListener('click',()=>T4.exportXLSX());
-  document.getElementById('t4-agg-json').addEventListener('click',()=>T4.exportAggJSON());
-  document.getElementById('t4-agg-csv').addEventListener('click',()=>T4.exportAggCSV());
-  document.getElementById('t4-agg-xlsx').addEventListener('click',()=>T4.exportAggXLSX());
+  document.getElementById('t4-level-sel').addEventListener('change',()=>T4.updateDlSummary());
   T4.checkResumable();
 
   // Tab 5
@@ -1357,5 +1682,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
 
   ['t1','t2','t3','t4'].forEach(t=>setStatus(t,'idle'));
   setStatus5('idle');
+  setStatusT6('idle');
+  T6.refreshInfo();
   loadStorage();
 });
