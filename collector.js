@@ -943,6 +943,8 @@ const T4={
       document.getElementById('t4-agg-info').innerHTML=`<strong>${aggRows.length}</strong> villages (iddesa).`;
       const aggKecRows=this.aggregateByIdkec();
       document.getElementById('t4-agg-kec-info').innerHTML=`<strong>${aggKecRows.length}</strong> kecamatan (idkec).`;
+      const aggUserRows=this.aggregateByUsername();
+      document.getElementById('t4-agg-username-info').innerHTML=`<strong>${aggUserRows.length}</strong> username${aggUserRows.length===1?'':'s'}.`;
       showDL('t4',this.collected.length);
       this.updateDlSummary();
     }
@@ -1009,22 +1011,40 @@ const T4={
   // (province+regency+district+village), idkec is the first 7
   // (province+regency+district). regionTotal and every status.* column sum
   // across whichever regionCode entries share that prefix.
-  aggregateByPrefix(prefixLen,keyName){
+  // Generic rollup: keyFn picks the group key for each exploded row,
+  // regionTotal and every status.* column sum within each group, then the
+  // same total_assignment/submitted/progress columns get computed on top.
+  aggregateBy(keyName,keyFn){
     const rows=this.buildExportRows();
     const groups=new Map(),order=[];
     for(const row of rows){
-      const regionCode=row.regionCode;
-      const keyVal=regionCode?String(regionCode).slice(0,prefixLen):'(unassigned)';
+      const keyVal=keyFn(row);
       if(!groups.has(keyVal)){groups.set(keyVal,{[keyName]:keyVal,regionCodeCount:0,regionTotal:0});order.push(keyVal);}
       const agg=groups.get(keyVal);
-      if(regionCode)agg.regionCodeCount+=1;
+      if(row.regionCode)agg.regionCodeCount+=1;
       agg.regionTotal+=Number(row.regionTotal)||0;
       for(const[key,value]of Object.entries(row))if(key.startsWith('status.'))agg[key]=(agg[key]||0)+(Number(value)||0);
     }
     return order.map(key=>this.addStatusAggregates(groups.get(key)));
   },
+  aggregateByPrefix(prefixLen,keyName){
+    return this.aggregateBy(keyName,row=>{const rc=row.regionCode;return rc?String(rc).slice(0,prefixLen):'(unassigned)';});
+  },
   aggregateByIddesa(){return this.aggregateByPrefix(10,'iddesa');},
   aggregateByIdkec(){return this.aggregateByPrefix(7,'idkec');},
+  // The endpoint's exact field name for the username isn't fixed across
+  // payload variants, so this looks for any flattened key containing
+  // "username" (preferring an exact match) rather than hardcoding one.
+  findUsernameField(rows){
+    const keys=new Set();
+    rows.forEach(r=>Object.keys(r).forEach(k=>keys.add(k)));
+    const candidates=[...keys].filter(k=>/username/i.test(k));
+    return candidates.includes('username')?'username':(candidates[0]||null);
+  },
+  aggregateByUsername(){
+    const field=this.findUsernameField(this.buildExportRows());
+    return this.aggregateBy('username',row=>field?String(row[field]??'(unknown)'):'(unknown)');
+  },
   // Computed columns are pulled out and appended last regardless of where
   // they fall in each row's own key order, so they consistently land at
   // the end of the exported header row.
@@ -1039,12 +1059,14 @@ const T4={
   LEVEL_META:{
     raw:{noun:'records',sheet:'Report Progress',base:'report_progress'},
     iddesa:{noun:'villages',sheet:'By iddesa',base:'report_progress_by_iddesa'},
-    idkec:{noun:'kecamatan',sheet:'By idkec',base:'report_progress_by_idkec'}
+    idkec:{noun:'kecamatan',sheet:'By idkec',base:'report_progress_by_idkec'},
+    username:{noun:'usernames',sheet:'By username',base:'report_progress_by_username'}
   },
   selectedLevel(){return document.getElementById('t4-level-sel').value;},
   levelRows(level){
     if(level==='iddesa')return this.aggregateByIddesa();
     if(level==='idkec')return this.aggregateByIdkec();
+    if(level==='username')return this.aggregateByUsername();
     return this.buildExportRows();
   },
   updateDlSummary(){
