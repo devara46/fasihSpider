@@ -278,6 +278,7 @@
       <button class="btn btn-exp xlsx" id="t2-xlsx">&#128209; XLSX</button>
       <div class="dl-sep"></div>
       <button class="btn btn-exp err" id="t2-err-exp" disabled>&#9888; No errors</button>
+      <button class="btn btn-start" id="t2-retry-err" disabled>&#8635; Retry Errors</button>
     </div>
   </div>
 </div>
@@ -433,6 +434,7 @@
       </div>
       <textarea id="t4-payload" spellcheck="false"></textarea>
       <div class="hint" style="margin:4px 0 9px;">Sent as-is each call. <code>page</code> is overwritten automatically.</div>
+      <div class="field"><label>Concurrency</label><input id="t4-conc" type="number" value="1" min="1" max="5"></div>
       <div class="btn-row">
         <button class="btn btn-start" id="t4-start">&#9654; Start</button>
         <button class="btn btn-stop"  id="t4-stop" disabled>&#9632; Stop</button>
@@ -485,6 +487,29 @@
       <div class="field">
         <label>Kabupaten Code</label>
         <input id="t7-kab" type="text" value="5206" maxlength="10">
+      </div>
+      <div class="field" style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+        <input id="t7-enrich" type="checkbox" style="width:auto;flex:none;">
+        <label for="t7-enrich" style="margin:0;font-size:12px;color:var(--text);">Enrich with assignment data1/data2</label>
+      </div>
+      <div id="t7-enrich-opts">
+        <div class="radio-group">
+          <div class="radio-btn active" id="t7-enrich-src-api">Live API</div>
+          <div class="radio-btn"       id="t7-enrich-src-tab2">Assignment List Tab</div>
+          <div class="radio-btn"       id="t7-enrich-src-file">Upload File</div>
+        </div>
+        <div id="t7-enrich-from-api" class="row2">
+          <div class="field"><label>Enrich Concurrency</label><input id="t7-enrich-conc" type="number" value="2" min="1" max="5"></div>
+          <div class="field"><label>Enrich Delay (ms)</label><input id="t7-enrich-delay" type="number" value="100" min="0" max="5000" step="50"></div>
+        </div>
+        <div id="t7-enrich-from-tab2" style="display:none;">
+          <div class="info-box" id="t7-enrich-tab2-info">No Assignment List Tab results yet.</div>
+        </div>
+        <div id="t7-enrich-from-file" style="display:none;">
+          <div class="drop-area" id="t7-enrich-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">Assignment List export (.json .csv .xlsx) — needs assignmentId, data1, data2 columns</span></div>
+          <input type="file" id="t7-enrich-file-input" accept=".json,.csv,.txt,.xlsx,.xls" style="display:none;">
+          <div class="info-box" id="t7-enrich-file-info" style="display:none;"></div>
+        </div>
       </div>
       <div class="btn-row">
         <button class="btn btn-start" id="t7-fetch">&#9654; Fetch Both</button>

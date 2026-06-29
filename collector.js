@@ -276,6 +276,13 @@ const DB = {
     return done;
   },
 
+  // Full rows (not just the key field) — used to drive a retry-in-place run.
+  async getAll(store){
+    const rows=[];
+    await this.stream(store,1000,async chunk=>{rows.push(...chunk);});
+    return rows;
+  },
+
   // Export all IDs/codes from a store to a simple CSV for retry
   async exportErrorCSV(store, keyField, filename) {
     const rows=[];
@@ -467,6 +474,35 @@ const T2={
     const total=await DB.count('t2_results');
     setStatus('t2',this.stopped?'stopped':'done');
     this.log(`Done — ${total} rows in DB, ${this.stats.err} errors.`,this.stopped?'w':'s');
+    T3.refreshInfo();showDL('t2',total);
+  },
+  // Re-fetches only the fullCodes currently sitting in t2_errors, merging
+  // successes into the existing t2_results rather than wiping the DB —
+  // unlike start(), which always clears both stores first.
+  async retryErrors(){
+    if(this.collecting)return;
+    const codes=(await DB.getAll('t2_errors')).map(r=>r.fullCode).filter(Boolean);
+    if(!codes.length)return alert('No errors to retry.');
+    const conc=parseInt(document.getElementById('t2-conc').value)||3,delay=parseInt(document.getElementById('t2-delay').value)||0;
+    this.collecting=true;this.stopped=false;
+    await DB.clear('t2_errors');// about to re-fetch exactly these; failures get re-added by fetch()
+    this.stats={total:codes.length,done:0,found:0,err:0,active:0};
+    this.wq=new WorkQueue(conc);setStatus('t2','running');document.getElementById('t2-retry-err').disabled=true;this.startMs=Date.now();
+    this.timer=setInterval(()=>document.getElementById('t2-elapsed').textContent=((Date.now()-this.startMs)/1000|0)+'s',1000);
+    this.log(`Retrying ${codes.length} failed fullCode(s) — merging into existing results`,'s');
+    await Promise.all(codes.map(code=>async()=>{
+      if(this.stopped)return;
+      const j=await this.wq.run(async()=>{this.stats.active++;updateStats('t2',this.stats);const d=await this.fetch(code);this.stats.active--;if(delay>0)await sleep(delay);return d;});
+      this.stats.done++;
+      const items=j?.success&&Array.isArray(j.data)?j.data:(j?.success&&j?.data?[j.data]:[]);
+      for(const item of items){await DB.add('t2_results',{fullCode:code,...item});if(item.assignmentId)this._assignmentIds.add(item.assignmentId);this.stats.found++;}
+      if(items.length)this.log(`OK[${code}] → ${items.length}`,'i');
+      updateStats('t2',this.stats);
+    }).map(t=>t()));
+    clearInterval(this.timer);this.collecting=false;
+    const total=await DB.count('t2_results'),remainingErr=await DB.count('t2_errors');
+    setStatus('t2',this.stopped?'stopped':'done');
+    this.log(`Retry done — ${total} rows in DB total, ${remainingErr} still failing.`,remainingErr?'w':'s');
     T3.refreshInfo();showDL('t2',total);
   },
   stop(){this.stopped=true;this.log('Stop...','w');document.getElementById('t2-stop').disabled=true;},
@@ -887,50 +923,60 @@ const T4={
     this.updateStats();
 
     const size=Number(basePayload.size)||10;
-    let page=startPage,totalPages=null,totalElements=null;
+    const conc=parseInt(document.getElementById('t4-conc').value)||1;
+    let page=startPage,totalPages=null,totalElements=null,done=false;
 
-    while(true){
+    // Pages are fetched conc-at-a-time (instead of strictly one-by-one) to
+    // shrink the wall-clock window over which this live, offset-paginated
+    // dataset can shift underneath us — e.g. TARGET_ONLY rows dropping out
+    // as enumerators submit mid-collection, which otherwise causes an
+    // undercount well below the true total.
+    while(!done){
       if(this.stopped){
         this.log('Stopped by user.','w');
         await this._saveProgress({collected:this.collected,lastPage:page-1,basePayload});
         break;
       }
-      const payload={...basePayload,page};
-      let response;
-      try{response=await this.fetchPage(payload,page);}
-      catch(e){
-        this.stats.err++;this.log(`Request failed after retries: ${e.message}${e.bodyText?` Server said: ${e.bodyText}`:''}`,'r');
-        await this._saveProgress({collected:this.collected,lastPage:page-1,basePayload});
-        setStatus('t4','stopped');
-        break;
-      }
-      const rows=this.extractRows(response);
-      this.collected.push(...rows);
-      this.stats.page=page;this.stats.records=this.collected.length;
-      this.log(`Page ${page}: ${rows.length} record${rows.length===1?'':'s'}`,'i');
-      this.updateStats();
-      await this._saveProgress({collected:this.collected,lastPage:page,basePayload});
+      const batchPages=Array.from({length:conc},(_,i)=>page+i);
+      const results=await Promise.all(batchPages.map(p=>
+        this.fetchPage({...basePayload,page:p},p).then(response=>({p,response})).catch(e=>({p,error:e}))
+      ));
 
-      if(totalPages===null)totalPages=this.readNumber(response,['totalPages','totalPage']);
-      if(totalElements===null)totalElements=this.readNumber(response,['totalElements','totalItems','total']);
+      for(const{p,response,error}of results){
+        if(this.stopped)break;
+        if(error){
+          this.stats.err++;this.log(`Request failed after retries (page ${p}): ${error.message}${error.bodyText?` Server said: ${error.bodyText}`:''}`,'r');
+          await this._saveProgress({collected:this.collected,lastPage:p-1,basePayload});
+          setStatus('t4','stopped');
+          done=true;break;
+        }
+        const rows=this.extractRows(response);
+        this.collected.push(...rows);
+        this.stats.page=p;this.stats.records=this.collected.length;
+        this.log(`Page ${p}: ${rows.length} record${rows.length===1?'':'s'}`,'i');
+        this.updateStats();
+        await this._saveProgress({collected:this.collected,lastPage:p,basePayload});
 
-      const reachedTotalPages=totalPages!==null&&page>=totalPages;
-      const reachedTotalElements=totalElements!==null&&this.collected.length>=totalElements;
-      const emptyPage=rows.length===0;
-      const shortPage=rows.length>0&&rows.length<size&&totalPages===null&&totalElements===null;
+        if(totalPages===null)totalPages=this.readNumber(response,['totalPages','totalPage']);
+        if(totalElements===null)totalElements=this.readNumber(response,['totalElements','totalItems','total']);
 
-      if(reachedTotalPages||reachedTotalElements||emptyPage||shortPage){
-        this.log(`Done, ${this.collected.length} record${this.collected.length===1?'':'s'} total.`,'s');
-        await this._clearProgress();
-        break;
+        const reachedTotalPages=totalPages!==null&&p>=totalPages;
+        const reachedTotalElements=totalElements!==null&&this.collected.length>=totalElements;
+        const emptyPage=rows.length===0;
+        const shortPage=rows.length>0&&rows.length<size&&totalPages===null&&totalElements===null;
+
+        if(reachedTotalPages||reachedTotalElements||emptyPage||shortPage){
+          this.log(`Done, ${this.collected.length} record${this.collected.length===1?'':'s'} total.`,'s');
+          await this._clearProgress();
+          done=true;break;
+        }
+        if(p>=this.MAX_PAGES){
+          this.log(`Stopped at the ${this.MAX_PAGES}-page safety limit.`,'r');
+          await this._saveProgress({collected:this.collected,lastPage:p,basePayload});
+          done=true;break;
+        }
       }
-      if(page>=this.MAX_PAGES){
-        this.log(`Stopped at the ${this.MAX_PAGES}-page safety limit.`,'r');
-        await this._saveProgress({collected:this.collected,lastPage:page,basePayload});
-        break;
-      }
-      page+=1;
-      await sleep(this.DELAY_MS);
+      if(!done){page+=conc;await sleep(this.DELAY_MS);}
     }
 
     clearInterval(this.timer);this.collecting=false;
@@ -1117,6 +1163,7 @@ const T7={
   },
   fetching:false,stopped:false,
   store:{usaha:{data:[],headers:[]},keluarga:{data:[],headers:[]}},
+  enrichSource:'api',enrichFileMap:null,
 
   log(msg,cls='i'){addLog('t7',msg,cls);},
 
@@ -1183,6 +1230,104 @@ const T7={
     return{data:allRows,headers:[...hSet]};
   },
 
+  ASSIGNMENT_BASE:'https://fasih-sm.bps.go.id/app/api/assignment-general/api/assignment/get-by-assignment-id',
+
+  async fetchAssignment(id,retries=3){
+    const url=`${this.ASSIGNMENT_BASE}?assignmentId=${id}`;
+    for(let a=1;a<=retries;a++){if(this.stopped)return null;
+      try{const r=await fetch(url,{credentials:'include'});if(!r.ok)throw new Error(`HTTP ${r.status}`);return await r.json();}
+      catch(e){if(a===retries){this.log(`ERR[${id}]: ${e.message}`,'r');return null;}await sleep(400*a);}
+    }return null;
+  },
+
+  // Builds an assignmentId→{data1,data2} map from whichever source is
+  // already at hand, instead of always re-hitting the live API per id.
+  async buildLookupFromTab2(){
+    const rows=await DB.getAll('t2_results');
+    const map=new Map();
+    for(const r of rows)if(r.assignmentId)map.set(r.assignmentId,{data1:r.data1??'',data2:r.data2??''});
+    return map;
+  },
+  refreshTab2Info(){
+    DB.count('t2_results').then(n=>{
+      const el=document.getElementById('t7-enrich-tab2-info');
+      if(el)el.innerHTML=n>0?`<strong>${n}</strong> rows in the Assignment List Tab's local database.`:'No Assignment List Tab results yet.';
+    });
+  },
+  async loadEnrichFile(file){
+    try{
+      const map=await parseAssignmentLookupFile(file);
+      this.enrichFileMap=map;
+      const info=document.getElementById('t7-enrich-file-info');
+      info.style.display='block';
+      info.innerHTML=`<strong>${map.size}</strong> assignment(s) loaded from <em>${escHtml(file.name)}</em>`;
+      this.log(`Loaded ${map.size} assignments from ${file.name}`,'s');
+    }catch(e){
+      this.enrichFileMap=null;
+      const info=document.getElementById('t7-enrich-file-info');
+      info.style.display='block';
+      info.innerHTML=`<strong style="color:var(--red);">Failed to load:</strong> ${escHtml(e.message)}`;
+      this.log(`File load error: ${e.message}`,'r');
+    }
+  },
+
+  // Merges a lookup map into every collected row, adding data1/data2 to
+  // each store's export headers. Shared by all three enrichment sources.
+  applyLookup(cache){
+    const types=['usaha','keluarga'];
+    let matched=0,total=0;
+    types.forEach(t=>{
+      this.store[t].data.forEach(r=>{
+        total++;
+        const hit=r.assignment_id?cache.get(r.assignment_id):null;
+        if(hit)matched++;
+        r.data1=hit?hit.data1:'';
+        r.data2=hit?hit.data2:'';
+      });
+      if(!this.store[t].headers.includes('data1'))this.store[t].headers.push('data1');
+      if(!this.store[t].headers.includes('data2'))this.store[t].headers.push('data2');
+    });
+    return{matched,total};
+  },
+
+  async enrichAssignments(){
+    if(this.enrichSource==='api')return this.enrichViaApi();
+    let cache;
+    if(this.enrichSource==='tab2'){
+      cache=await this.buildLookupFromTab2();
+      if(!cache.size){this.log('No Assignment List Tab results found in the local database.','r');return;}
+      this.log(`Using ${cache.size} assignment(s) from Assignment List Tab DB`,'i');
+    }else{
+      if(!this.enrichFileMap){this.log('No lookup file loaded — upload an Assignment List export first.','r');return;}
+      cache=this.enrichFileMap;
+      this.log(`Using ${cache.size} assignment(s) from uploaded file`,'i');
+    }
+    const{matched,total}=this.applyLookup(cache);
+    this.log(`Done — ${matched}/${total} record(s) matched.`,matched<total?'w':'s');
+  },
+
+  async enrichViaApi(){
+    const types=['usaha','keluarga'];
+    const ids=new Set();
+    types.forEach(t=>this.store[t].data.forEach(r=>{if(r.assignment_id)ids.add(r.assignment_id);}));
+    const idList=[...ids];
+    if(!idList.length)return;
+    const conc=parseInt(document.getElementById('t7-enrich-conc').value)||2,delay=parseInt(document.getElementById('t7-enrich-delay').value)||0;
+    const stats={total:idList.length,done:0,err:0,active:0};
+    const wq=new WorkQueue(conc);
+    this.log(`Start: ${idList.length} assignment_id(s) → enrich data1/data2`,'s');
+    const cache=new Map();
+    await Promise.all(idList.map(id=>async()=>{
+      if(this.stopped)return;
+      const j=await wq.run(async()=>{stats.active++;const d=await this.fetchAssignment(id);stats.active--;if(delay>0)await sleep(delay);return d;});
+      stats.done++;
+      if(j?.success&&j?.data){cache.set(id,{data1:j.data.data1??'',data2:j.data.data2??''});this.log(`OK[${id}]`,'i');}
+      else stats.err++;
+    }).map(t=>t()));
+    const{matched,total}=this.applyLookup(cache);
+    this.log(`Done — ${stats.total-stats.err} fetched ok, ${stats.err} fetch errors, ${matched}/${total} record(s) matched.`,stats.err?'w':'s');
+  },
+
   async fetch(){
     if(this.fetching)return;
     this.fetching=true;this.stopped=false;
@@ -1197,6 +1342,7 @@ const T7={
     try{
       this.store.usaha=await this.fetchLoop('usaha');
       if(!this.stopped)this.store.keluarga=await this.fetchLoop('keluarga');
+      if(!this.stopped&&document.getElementById('t7-enrich').checked)await this.enrichAssignments();
       const total=this.store.usaha.data.length+this.store.keluarga.data.length;
       document.getElementById('t7-records').textContent=total;
       const state=this.stopped?'stopped':'done';
@@ -1626,6 +1772,41 @@ async function parseRegionIdChainsFile(file){
   return out;
 }
 
+// Assignment List export (assignmentId, data1, data2, ...) used as an
+// offline lookup table for the Anomaly tab's enrichment step — same shape
+// T2.exportCSV/exportXLSX produce, so a previous Assignment List run's
+// export can be fed straight back in instead of re-hitting the live API.
+async function parseAssignmentLookupFile(file){
+  const ext=file.name.split('.').pop().toLowerCase();
+  const map=new Map();
+  if(ext==='json'){
+    let data=JSON.parse(await file.text());
+    if(data&&!Array.isArray(data)){for(const k of['data','results','rows','items']){if(Array.isArray(data[k])){data=data[k];break;}}}
+    if(!Array.isArray(data))data=[data];
+    for(const r of data){
+      if(!r||typeof r!=='object')continue;
+      const idKey=Object.keys(r).find(k=>/^assignment.?id$/i.test(k));
+      if(!idKey)continue;
+      const id=String(r[idKey]??'').trim();if(!id)continue;
+      const d1Key=Object.keys(r).find(k=>/^data1$/i.test(k));
+      const d2Key=Object.keys(r).find(k=>/^data2$/i.test(k));
+      map.set(id,{data1:String(r[d1Key]??''),data2:String(r[d2Key]??'')});
+    }
+    return map;
+  }
+  const table=await readTableFromFile(file);
+  const headerRow=table[0].map(h=>String(h??'').trim().toLowerCase());
+  const colIdx=requireColumns(headerRow,['assignmentid','data1','data2']);
+  for(let i=1;i<table.length;i++){
+    const r=table[i];
+    if(!r||r.every(v=>v===undefined||v===null||v===''))continue;
+    const id=String(r[colIdx.assignmentid]??'').trim();
+    if(!id)continue;
+    map.set(id,{data1:String(r[colIdx.data1]??''),data2:String(r[colIdx.data2]??'')});
+  }
+  return map;
+}
+
 function parseDelimitedText(text){
   const lines=text.replace(/\r/g,'').split('\n').filter(l=>l.length>0);
   const delim=lines[0]&&lines[0].includes('\t')&&!lines[0].includes(',')?'\t':',';
@@ -1730,7 +1911,10 @@ function addLog(tab,msg,cls='i'){const ts=new Date().toLocaleTimeString('en-GB')
 function clearLog(tab){LOG_BUF[tab]=[];renderLog(tab);}
 function renderLog(tab){const el=document.getElementById(`${tab}-log-area`);if(!el)return;el.innerHTML=LOG_BUF[tab].map(e=>`<div class="le l${e.cls}"><span class="lts">${e.ts}</span>${escHtml(e.msg)}</div>`).join('');}
 function setStatus(tab,state){const b=document.getElementById(`${tab}-badge`);b.textContent={idle:'Idle',running:'Running',done:'Done',stopped:'Stopped'}[state]||state;b.className=`badge ${state}`;document.getElementById(`${tab}-start`).disabled=state==='running';document.getElementById(`${tab}-stop`).disabled=state!=='running';}
-function updateErrBtn(tab,count){const btn=document.getElementById(`${tab}-err-exp`);if(!btn)return;btn.disabled=count===0;btn.textContent=count>0?`\u26a0 ${count} failed`:'\u26a0 No errors';}
+function updateErrBtn(tab,count){
+  const btn=document.getElementById(`${tab}-err-exp`);if(btn){btn.disabled=count===0;btn.textContent=count>0?`\u26a0 ${count} failed`:'\u26a0 No errors';}
+  const retryBtn=document.getElementById(`${tab}-retry-err`);if(retryBtn)retryBtn.disabled=count===0;
+}
 function updateStats(tab,s){
   const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
   if(tab==='t1'){set('t1-req',s.req);set('t1-rows',s.rows);set('t1-err',s.err);set('t1-act',s.active);}
@@ -1764,13 +1948,17 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     const n=await DB.count(store);
     if(n>0){showDL(tab,n);addLog(tab,`Found ${n} rows in local database from previous session.`,'s');}
   }
+  for(const tab of['t2','t3']){
+    const errCount=await DB.count(`${tab}_errors`);
+    if(errCount>0)updateErrBtn(tab,errCount);
+  }
 
   // Nav switching (vertical sidebar)
   document.querySelectorAll('.nav-btn').forEach(btn=>btn.addEventListener('click',()=>{
     document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
     btn.classList.add('active');document.getElementById(btn.dataset.tab).classList.add('active');
-    if(btn.dataset.tab==='t2')T2.refreshInfo();if(btn.dataset.tab==='t3')T3.refreshInfo();if(btn.dataset.tab==='t6')T6.refreshInfo();if(btn.dataset.tab==='t7')renderLog('t7');
+    if(btn.dataset.tab==='t2')T2.refreshInfo();if(btn.dataset.tab==='t3')T3.refreshInfo();if(btn.dataset.tab==='t6')T6.refreshInfo();if(btn.dataset.tab==='t7'){renderLog('t7');T7.refreshTab2Info();}
   }));
 
   document.getElementById('exp-cancel').addEventListener('click',()=>{exportCancelled=true;hideExportProgress();});
@@ -1790,6 +1978,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('t2-csv').addEventListener('click',()=>T2.exportCSV());
   document.getElementById('t2-xlsx').addEventListener('click',()=>T2.exportXLSX());
   document.getElementById('t2-err-exp').addEventListener('click',()=>T2.exportErrors());
+  document.getElementById('t2-retry-err').addEventListener('click',()=>{if(!T2.collecting)T2.retryErrors();});
   document.getElementById('t2-clear-db').addEventListener('click',()=>T2.clearDB());
 
   // Tab 3
@@ -1865,6 +2054,25 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('t7-json').addEventListener('click',()=>T7.exportJSON());
   document.getElementById('t7-csv').addEventListener('click',()=>T7.exportCSV());
   document.getElementById('t7-xlsx').addEventListener('click',()=>T7.exportXLSX());
+
+  {
+    const srcBtns={api:'t7-enrich-src-api',tab2:'t7-enrich-src-tab2',file:'t7-enrich-src-file'};
+    const panels={api:'t7-enrich-from-api',tab2:'t7-enrich-from-tab2',file:'t7-enrich-from-file'};
+    Object.entries(srcBtns).forEach(([mode,btnId])=>{
+      document.getElementById(btnId).addEventListener('click',()=>{
+        T7.enrichSource=mode;
+        Object.entries(srcBtns).forEach(([m,id])=>document.getElementById(id).classList.toggle('active',m===mode));
+        Object.entries(panels).forEach(([m,id])=>document.getElementById(id).style.display=m===mode?'':'none');
+        if(mode==='tab2')T7.refreshTab2Info();
+      });
+    });
+    const drop=document.getElementById('t7-enrich-drop'),input=document.getElementById('t7-enrich-file-input');
+    drop.addEventListener('click',()=>input.click());
+    drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag');});
+    drop.addEventListener('dragleave',()=>drop.classList.remove('drag'));
+    drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag');const f=e.dataTransfer.files[0];if(f)T7.loadEnrichFile(f);});
+    input.addEventListener('change',()=>{const f=input.files[0];if(f)T7.loadEnrichFile(f);});
+  }
 
   ['t1','t2','t3','t4'].forEach(t=>setStatus(t,'idle'));
   setStatus5('idle');
