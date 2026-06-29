@@ -182,6 +182,23 @@ const DB = {
     });
   },
 
+  // Cursor-based delete for rows matching a predicate — used to drop a
+  // chain's previously-collected (possibly partial) rows before retrying it,
+  // so a retry-in-place run can't duplicate rows already written pre-error.
+  async deleteWhere(store,predicate){
+    return new Promise((res,rej)=>{
+      const tx=this._db.transaction(store,'readwrite');
+      const cursor=tx.objectStore(store).openCursor();
+      let deleted=0;
+      cursor.onsuccess=e=>{
+        const c=e.target.result;
+        if(c){if(predicate(c.value)){c.delete();deleted++;}c.continue();}
+        else res(deleted);
+      };
+      cursor.onerror=()=>rej(cursor.error);
+    });
+  },
+
   // Stream records through callback(chunk[]). Returns total records read.
   async stream(store, chunkSize, onChunk) {
     return new Promise((res,rej)=>{
@@ -575,6 +592,35 @@ const T3={
     this.log(`Done — ${total} assignments in DB, ${this.stats.err} errors.`,this.stopped?'w':'s');
     showDL('t3',total);
   },
+  // Re-fetches only the assignmentIds currently sitting in t3_errors,
+  // merging successes into the existing t3_results rather than wiping the
+  // DB — same retry-in-place pattern as T2.retryErrors. Safe to merge
+  // as-is (no partial-write risk like T6's paginated chains): each
+  // assignmentId is one complete fetch, never partially written.
+  async retryErrors(){
+    if(this.collecting)return;
+    const ids=(await DB.getAll('t3_errors')).map(r=>r.assignmentId).filter(Boolean);
+    if(!ids.length)return alert('No errors to retry.');
+    const conc=parseInt(document.getElementById('t3-conc').value)||2,delay=parseInt(document.getElementById('t3-delay').value)||0;
+    this.collecting=true;this.stopped=false;
+    await DB.clear('t3_errors');// about to re-fetch exactly these; failures get re-added by fetch()
+    this.stats={total:ids.length,done:0,err:0,active:0};
+    this.wq=new WorkQueue(conc);setStatus('t3','running');document.getElementById('t3-retry-err').disabled=true;this.startMs=Date.now();
+    this.timer=setInterval(()=>document.getElementById('t3-elapsed').textContent=((Date.now()-this.startMs)/1000|0)+'s',1000);
+    this.log(`Retrying ${ids.length} failed assignmentId(s) — merging into existing results`,'s');
+    await Promise.all(ids.map(id=>async()=>{
+      if(this.stopped)return;
+      const j=await this.wq.run(async()=>{this.stats.active++;updateStats('t3',this.stats);const d=await this.fetch(id);this.stats.active--;if(delay>0)await sleep(delay);return d;});
+      this.stats.done++;
+      if(j?.success&&j?.data){await DB.add('t3_results',this.parseRaw(id,j.data));this.log(`OK[${id}]`,'i');}
+      updateStats('t3',this.stats);
+    }).map(t=>t()));
+    clearInterval(this.timer);this.collecting=false;
+    const total=await DB.count('t3_results'),remainingErr=await DB.count('t3_errors');
+    setStatus('t3',this.stopped?'stopped':'done');
+    this.log(`Retry done — ${total} assignments in DB total, ${remainingErr} still failing.`,remainingErr?'w':'s');
+    showDL('t3',total);
+  },
   stop(){this.stopped=true;this.log('Stop...','w');document.getElementById('t3-stop').disabled=true;},
   log(msg,cls='i'){addLog('t3',msg,cls);},
   refreshInfo(){const n=T2.getAssignmentIds().length,el=document.getElementById('t3-tab2-info');el.innerHTML=n>0?`<strong>${n}</strong> unique assignmentIds from Assignment List Tab (${n} total).`:'No Assignment List Tab results yet.';},
@@ -773,6 +819,61 @@ const T6={
     showDL('t6',total);
   },
   stop(){this.stopped=true;this.log('Stop requested...','w');document.getElementById('t6-stop').disabled=true;},
+
+  // Re-runs only the region chains recorded in errorItems, merging into the
+  // existing t6_results. Unlike T2/T3's simple per-id fetch, a chain is
+  // paginated — a prior failure can leave some pages of that chain already
+  // written before the error page. So each retried chain's existing rows
+  // are deleted first, to avoid duplicating those partial pages, before
+  // collectChain pages it again from start=0.
+  async retryErrors(){
+    if(this.running)return;
+    if(!this.errorItems.length)return alert('No errors to retry.');
+    const chainsMap=new Map();
+    for(const item of this.errorItems){
+      const chain={};
+      for(let l=1;l<=6;l++){const v=item[`region${l}Id`];if(v)chain[l]=v;}
+      if(!Object.keys(chain).length)continue;
+      const key=JSON.stringify(chain);
+      if(!chainsMap.has(key))chainsMap.set(key,{chain,deepest:Math.max(...Object.keys(chain).map(Number))});
+    }
+    const chains=[...chainsMap.values()];
+    if(!chains.length)return alert('No retryable region chains found in recorded errors.');
+    const conc=parseInt(document.getElementById('t6-conc').value)||1;
+    const length=parseInt(document.getElementById('t6-length').value)||10;
+    const delay=parseInt(document.getElementById('t6-delay').value)||0;
+    const surveyPeriodId=document.getElementById('t6-survey').value.trim()||T4.DEFAULT_PAYLOAD.surveyPeriodId;
+
+    this.running=true;this.stopped=false;this.errorItems=[];
+    this.stats={chainsTotal:chains.length,chainsDone:0,records:0,err:0,active:0};
+    this.wq=new WorkQueue(conc);
+    setStatusT6('running');updateErrBtn('t6',0);document.getElementById('t6-retry-err').disabled=true;this.startMs=Date.now();
+    this.timer=setInterval(()=>document.getElementById('t6-elapsed').textContent=((Date.now()-this.startMs)/1000|0)+'s',1000);
+    document.getElementById('t6-start').disabled=true;document.getElementById('t6-stop').disabled=false;
+    this.log(`Retrying ${chains.length} failed region chain(s) — merging into existing results`,'s');
+    updateStatsT6();
+
+    await Promise.all(chains.map(chainInfo=>this.wq.run(async()=>{
+      if(this.stopped)return;
+      this.stats.active++;updateStatsT6();
+      await DB.deleteWhere('t6_results',row=>{
+        for(const[lvl,id]of Object.entries(chainInfo.chain))if(String(row[`region${lvl}Id`]??'')!==String(id))return false;
+        return true;
+      });
+      this.log(`Retry region chain: ${JSON.stringify(chainInfo.chain)}`,'i');
+      await this.collectChain(chainInfo,length,delay,surveyPeriodId);
+      this.stats.active--;this.stats.chainsDone++;
+      updateStatsT6();
+    })));
+    if(this.stopped)this.log('Stopped by user.','w');
+
+    clearInterval(this.timer);this.running=false;
+    document.getElementById('t6-start').disabled=false;document.getElementById('t6-stop').disabled=true;
+    const total=await DB.count('t6_results');
+    setStatusT6(this.stopped?'stopped':'done');
+    this.log(`Retry done — ${total} rows in DB total, ${this.stats.err} chain${this.stats.err===1?'':'s'} still failing.`,this.stats.err?'w':'s');
+    showDL('t6',total);
+  },
 
   T6_HEADERS:['region1Id','region2Id','region3Id','region4Id','region5Id','region6Id','id','codeIdentity','data1','data2','data3','data4','data5','data6','data7','data8','data9','data10','assignmentStatusId','assignmentStatusAlias','strata','currentUserFullname','currentUserUsername','currentUserSurveyRoleName','dateCreated','dateModified'],
   rowMapper(rec){const f={};this.T6_HEADERS.forEach(h=>f[h]=String(rec[h]??''));return f;},
@@ -1988,6 +2089,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('t3-csv').addEventListener('click',()=>T3.exportCSV());
   document.getElementById('t3-xlsx').addEventListener('click',()=>T3.exportXLSX());
   document.getElementById('t3-err-exp').addEventListener('click',()=>T3.exportErrors());
+  document.getElementById('t3-retry-err').addEventListener('click',()=>{if(!T3.collecting)T3.retryErrors();});
   document.getElementById('t3-clear-db').addEventListener('click',()=>T3.clearDB());
 
   // Tab 6
@@ -1997,6 +2099,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('t6-csv').addEventListener('click',()=>T6.exportCSV());
   document.getElementById('t6-xlsx').addEventListener('click',()=>T6.exportXLSX());
   document.getElementById('t6-err-exp').addEventListener('click',()=>T6.exportErrors());
+  document.getElementById('t6-retry-err').addEventListener('click',()=>{if(!T6.running)T6.retryErrors();});
   document.getElementById('t6-clear-db').addEventListener('click',()=>T6.clearDB());
 
   function makeSourceToggle(srcBtnId,fileBtnId,fromSrcId,fromFileId,obj,primaryMode,dropId,inputId){
