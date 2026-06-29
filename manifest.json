@@ -6,7 +6,8 @@
   "permissions": ["storage", "tabs", "cookies", "scripting", "downloads"],
   "host_permissions": [
     "https://fasih-sm.bps.go.id/*",
-    "https://fasih-dashboard.bps.go.id/*"
+    "https://fasih-dashboard.bps.go.id/*",
+    "https://dashboard-se2026.apps.bps.go.id/*"
   ],
   "action": {
     "default_popup": "popup.html",

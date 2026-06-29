@@ -121,6 +121,11 @@
     <button class="nav-btn active" data-tab="t4"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span>Report Progress</span><span class="nb-sub">By responsibility</span></button>
     <button class="nav-btn"        data-tab="t5"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></span>SQL Lab</span><span class="nb-sub">Close all tabs</span></button>
     <hr class="nav-divider">
+    <div class="nav-group-label">Dashboard Collector</div>
+    <div class="nav-group">
+      <button class="nav-btn" data-tab="t7"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>Anomaly</span><span class="nb-sub">Case by Kabupaten</span></button>
+    </div>
+    <hr class="nav-divider">
     <div class="nav-group-label">Raw Collector</div>
     <div class="nav-group">
       <button class="nav-btn" data-tab="t1"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg></span>Region Hierarchy</span><span class="nb-sub">Level 3&ndash;6 codes</span></button>
@@ -468,6 +473,54 @@
       <button class="btn btn-exp"      id="t4-json">&#128196; JSON</button>
       <button class="btn btn-exp csv"  id="t4-csv">&#128202; CSV</button>
       <button class="btn btn-exp xlsx" id="t4-xlsx">&#128209; XLSX</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TAB 7: Anomaly — Dashboard Collector ===== -->
+<div class="tab-content" id="t7">
+  <div class="split">
+    <div class="panel cfg">
+      <div class="slabel">Configuration</div>
+      <div class="field">
+        <label>Kabupaten Code</label>
+        <input id="t7-kab" type="text" value="5206" maxlength="10">
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-start" id="t7-fetch">&#9654; Fetch Both</button>
+        <button class="btn btn-stop"  id="t7-stop" disabled>&#9632; Stop</button>
+      </div>
+      <hr class="divider">
+      <div class="info-box" style="font-size:10.5px;color:var(--muted);line-height:1.7;">
+        Fetches anomaly cases from the SE2026 dashboard API.<br>
+        Must be accessible from this Chrome profile.
+      </div>
+    </div>
+    <div class="panel stats no-br">
+      <div class="slabel">Status</div>
+      <div class="stat-row">
+        <div class="stat">Status: <span id="t7-badge" class="badge idle">Idle</span></div>
+        <div class="stat">Records: <span id="t7-records">0</span></div>
+        <div class="stat">Elapsed: <span id="t7-elapsed">0s</span></div>
+      </div>
+    </div>
+    <div class="panel log-p no-br no-bb">
+      <div class="slabel">Activity Log</div>
+      <div class="log-area" id="t7-log-area"></div>
+    </div>
+  </div>
+  <div class="dl-bar" id="t7-dl">
+    <div class="dl-row">
+      <div class="field" style="margin:0;min-width:130px;"><label>Download Type</label>
+        <select id="t7-type-dl">
+          <option value="usaha">Usaha</option>
+          <option value="keluarga">Keluarga</option>
+        </select>
+      </div>
+      <div class="dl-info">Ready: <strong id="t7-dl-count">0</strong> records</div>
+      <button class="btn btn-exp"      id="t7-json">&#128196; JSON</button>
+      <button class="btn btn-exp csv"  id="t7-csv">&#128202; CSV</button>
+      <button class="btn btn-exp xlsx" id="t7-xlsx">&#128209; XLSX</button>
     </div>
   </div>
 </div>

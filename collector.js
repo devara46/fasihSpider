@@ -1102,6 +1102,162 @@ const T4={
 };
 
 // ────────────────────────────────────────────────────────────────────────────
+// TAB 7: Anomaly — Dashboard SE2026 single-fetch collector
+// ────────────────────────────────────────────────────────────────────────────
+const T7={
+  CONFIGS:{
+    usaha:{
+      base:'https://dashboard-se2026.apps.bps.go.id/api/mikro/anomali-case-kab?kode_kabupaten={kab}&indikator=128,129,130,131,132,133,134,135&sudah_indikator=40,41,42,43,44,45,46,46&type=usaha&anomali_no={no}',
+      count:8,
+    },
+    keluarga:{
+      base:'https://dashboard-se2026.apps.bps.go.id/api/mikro/anomali-case-kab?kode_kabupaten={kab}&indikator=136,137,139,140,141,142&sudah_indikator=47,48,50,51,52,53&type=keluarga&anomali_no={no}',
+      count:7,
+    },
+  },
+  fetching:false,stopped:false,
+  store:{usaha:{data:[],headers:[]},keluarga:{data:[],headers:[]}},
+
+  log(msg,cls='i'){addLog('t7',msg,cls);},
+
+  buildUrl(type,no){
+    const kab=document.getElementById('t7-kab').value.trim()||'5206';
+    return this.CONFIGS[type].base.replace('{kab}',encodeURIComponent(kab)).replace('{no}',no);
+  },
+
+  normaliseRows(json){
+    let rows=json;
+    if(!Array.isArray(rows)){
+      for(const k of['data','result','items','rows','list','content']){
+        if(Array.isArray(json[k])){rows=json[k];break;}
+      }
+    }
+    return Array.isArray(rows)?rows:[json];
+  },
+
+  MAX_RETRIES:4,RETRY_BASE_MS:1500,RETRYABLE:[429,500,502,503,504],
+
+  async fetchWithRetry(url,label){
+    let attempt=0;
+    while(true){
+      try{
+        const r=await window.fetch(url,{credentials:'include'});
+        if(!r.ok){
+          const err=Object.assign(new Error(`HTTP ${r.status} ${r.statusText}`),{status:r.status});
+          throw err;
+        }
+        return await r.json();
+      }catch(e){
+        const retryable=e.status==null||this.RETRYABLE.includes(e.status);
+        attempt++;
+        if(!retryable||attempt>this.MAX_RETRIES){
+          this.log(`${label} failed after ${attempt} attempt${attempt===1?'':'s'}: ${e.message}`,'r');
+          return null;
+        }
+        const delay=this.RETRY_BASE_MS*2**(attempt-1);
+        this.log(`${label} ${e.message}, retry ${attempt}/${this.MAX_RETRIES} in ${Math.round(delay/1000)}s...`,'w');
+        await sleep(delay);
+      }
+    }
+  },
+
+  async fetchLoop(type){
+    const cfg=this.CONFIGS[type];
+    const allRows=[];
+    const hSet=new Set();
+    let errors=0;
+    for(let no=1;no<=cfg.count;no++){
+      if(this.stopped)break;
+      const url=this.buildUrl(type,no);
+      this.log(`${type} anomali_no=${no}: ${url}`,'i');
+      const json=await this.fetchWithRetry(url,`${type} no=${no}`);
+      if(json===null){errors++;continue;}
+      const rows=this.normaliseRows(json);
+      rows.forEach(row=>Object.keys(row).forEach(k=>hSet.add(k)));
+      allRows.push(...rows);
+      this.log(`${type} no=${no} → ${rows.length} record${rows.length===1?'':'s'} (total ${allRows.length})`,'i');
+      document.getElementById('t7-records').textContent=
+        this.store.usaha.data.length+this.store.keluarga.data.length+allRows.length;
+    }
+    if(errors)this.log(`${type}: ${errors} request${errors===1?'':'s'} failed and skipped`,'w');
+    return{data:allRows,headers:[...hSet]};
+  },
+
+  async fetch(){
+    if(this.fetching)return;
+    this.fetching=true;this.stopped=false;
+    this.store={usaha:{data:[],headers:[]},keluarga:{data:[],headers:[]}};
+    const startMs=Date.now();
+    clearLog('t7');hideDL('t7');
+    document.getElementById('t7-badge').textContent='Running';document.getElementById('t7-badge').className='badge running';
+    document.getElementById('t7-records').textContent='0';
+    document.getElementById('t7-fetch').disabled=true;
+    document.getElementById('t7-stop').disabled=false;
+    const timer=setInterval(()=>document.getElementById('t7-elapsed').textContent=((Date.now()-startMs)/1000|0)+'s',1000);
+    try{
+      this.store.usaha=await this.fetchLoop('usaha');
+      if(!this.stopped)this.store.keluarga=await this.fetchLoop('keluarga');
+      const total=this.store.usaha.data.length+this.store.keluarga.data.length;
+      document.getElementById('t7-records').textContent=total;
+      const state=this.stopped?'stopped':'done';
+      this.log(`${this.stopped?'Stopped':'Done'} — usaha: ${this.store.usaha.data.length}, keluarga: ${this.store.keluarga.data.length}`,this.stopped?'w':'s');
+      document.getElementById('t7-badge').textContent=this.stopped?'Stopped':'Done';
+      document.getElementById('t7-badge').className=`badge ${state}`;
+      if(total>0){showDL('t7',0);this.updateDlCount();}
+    }catch(e){
+      this.log(`Error: ${e.message}`,'r');
+      document.getElementById('t7-badge').textContent='Stopped';document.getElementById('t7-badge').className='badge stopped';
+    }finally{
+      clearInterval(timer);this.fetching=false;
+      document.getElementById('t7-fetch').disabled=false;
+      document.getElementById('t7-stop').disabled=true;
+    }
+  },
+
+  stop(){this.stopped=true;this.log('Stop requested...','w');document.getElementById('t7-stop').disabled=true;},
+
+  selectedType(){return document.getElementById('t7-type-dl').value;},
+  current(){return this.store[this.selectedType()];},
+  updateDlCount(){
+    const c=this.current();
+    document.getElementById('t7-dl-count').textContent=c.data.length;
+  },
+
+  rowFlat(r,headers){const f={};headers.forEach(h=>f[h]=String(r[h]??''));return f;},
+
+  exportJSON(){
+    const type=this.selectedType();
+    const{data,headers}=this.store[type]||{data:[],headers:[]};
+    this.log(`Exporting JSON — type: ${type}, records: ${data.length}`,'i');
+    if(!data.length)return alert('No data for '+type+'.');
+    downloadBlob(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),`anomaly_${type}_${nowTs()}.json`);
+    this.log(`Exported ${type} JSON (${data.length} records)`,'s');
+  },
+  exportCSV(){
+    const type=this.selectedType();
+    const{data,headers}=this.store[type]||{data:[],headers:[]};
+    this.log(`Exporting CSV — type: ${type}, records: ${data.length}`,'i');
+    if(!data.length)return alert('No data for '+type+'.');
+    const rows=data.map(r=>this.rowFlat(r,headers));
+    downloadBlob(new Blob([buildCSV(headers,rows)],{type:'text/csv;charset=utf-8'}),`anomaly_${type}_${nowTs()}.csv`);
+    this.log(`Exported ${type} CSV (${data.length} records)`,'s');
+  },
+  async exportXLSX(){
+    const type=this.selectedType();
+    const{data,headers}=this.store[type]||{data:[],headers:[]};
+    this.log(`Exporting XLSX — type: ${type}, records: ${data.length}`,'i');
+    if(!data.length)return alert('No data for '+type+'.');
+    const rows=data.map(r=>this.rowFlat(r,headers));
+    showExportProgress('Building XLSX...');
+    try{
+      const xlsx=await buildXLSXFromArray('Anomaly '+type,headers,rows,(d,t)=>updateExportProgress(d,t));
+      if(!exportCancelled)downloadBlob(new Blob([xlsx],{type:XLSX_MIME}),`anomaly_${type}_${nowTs()}.xlsx`);
+    }finally{hideExportProgress();}
+    this.log(`Exported ${type} XLSX (${data.length} records)`,'s');
+  },
+};
+
+// ────────────────────────────────────────────────────────────────────────────
 // TAB 5: SQL Lab — close every open SQL Lab tab on the Superset dashboard.
 // Runs via chrome.scripting.executeScript inside the dashboard tab itself
 // (not via fetch), since this is a DOM-click task, not an API call.
@@ -1569,7 +1725,7 @@ function setStatus5(state){
 // ────────────────────────────────────────────────────────────────────────────
 // Shared UI helpers
 // ────────────────────────────────────────────────────────────────────────────
-const LOG_BUF={t1:[],t2:[],t3:[],t4:[],t5:[],t6:[]};
+const LOG_BUF={t1:[],t2:[],t3:[],t4:[],t5:[],t6:[],t7:[]};
 function addLog(tab,msg,cls='i'){const ts=new Date().toLocaleTimeString('en-GB');LOG_BUF[tab].unshift({ts,msg,cls});if(LOG_BUF[tab].length>300)LOG_BUF[tab].length=300;renderLog(tab);}
 function clearLog(tab){LOG_BUF[tab]=[];renderLog(tab);}
 function renderLog(tab){const el=document.getElementById(`${tab}-log-area`);if(!el)return;el.innerHTML=LOG_BUF[tab].map(e=>`<div class="le l${e.cls}"><span class="lts">${e.ts}</span>${escHtml(e.msg)}</div>`).join('');}
@@ -1614,7 +1770,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
     btn.classList.add('active');document.getElementById(btn.dataset.tab).classList.add('active');
-    if(btn.dataset.tab==='t2')T2.refreshInfo();if(btn.dataset.tab==='t3')T3.refreshInfo();if(btn.dataset.tab==='t6')T6.refreshInfo();
+    if(btn.dataset.tab==='t2')T2.refreshInfo();if(btn.dataset.tab==='t3')T3.refreshInfo();if(btn.dataset.tab==='t6')T6.refreshInfo();if(btn.dataset.tab==='t7')renderLog('t7');
   }));
 
   document.getElementById('exp-cancel').addEventListener('click',()=>{exportCancelled=true;hideExportProgress();});
@@ -1701,6 +1857,14 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag');const f=e.dataTransfer.files[0];if(f)T5.loadFile(f);});
     input.addEventListener('change',()=>{const f=input.files[0];if(f)T5.loadFile(f);});
   }
+
+  // Tab 7
+  document.getElementById('t7-fetch').addEventListener('click',()=>T7.fetch());
+  document.getElementById('t7-stop').addEventListener('click',()=>T7.stop());
+  document.getElementById('t7-type-dl').addEventListener('change',()=>T7.updateDlCount());
+  document.getElementById('t7-json').addEventListener('click',()=>T7.exportJSON());
+  document.getElementById('t7-csv').addEventListener('click',()=>T7.exportCSV());
+  document.getElementById('t7-xlsx').addEventListener('click',()=>T7.exportXLSX());
 
   ['t1','t2','t3','t4'].forEach(t=>setStatus(t,'idle'));
   setStatus5('idle');
