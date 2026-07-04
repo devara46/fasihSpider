@@ -144,14 +144,12 @@ async function buildXLSXFromArray(sheetName, headers, rows, onProgress) {
 // ────────────────────────────────────────────────────────────────────────────
 const DB = {
   _db: null,
-  STORES: ['t2_results','t3_results','t2_errors','t3_errors','t6_results'],
+  STORES: ['t2_results','t3_results','t2_errors','t3_errors','t6_results','t8_results'],
 
   async open() {
     if(this._db)return;
     await new Promise((res,rej)=>{
-      // Bumped to 2 so onupgradeneeded fires again on existing installs and
-      // creates the new t6_results store alongside the originals.
-      const req=indexedDB.open('fasih_collector',2);
+      const req=indexedDB.open('fasih_collector',3);
       req.onupgradeneeded=e=>{
         const db=e.target.result;
         for(const s of this.STORES)if(!db.objectStoreNames.contains(s))db.createObjectStore(s,{autoIncrement:true,keyPath:'_iid'});
@@ -261,7 +259,7 @@ const DB = {
     };
 
     await this.stream(store,500,async chunk=>{
-      for(const rec of chunk){if(exportCancelled)return;batchRows.push(rowMapper(rec));}
+      for(const rec of chunk){if(exportCancelled)return;const mapped=rowMapper(rec);if(mapped!==null)batchRows.push(mapped);}
       rowsDone+=chunk.length;
       if(onProgress)onProgress(rowsDone,total,fileNum,splits);
       if(batchRows.length>=splitAt)await flushFile();
@@ -282,6 +280,7 @@ const DB = {
       let csv='';
       for(const rec of chunk){
         const row=rowMapper(rec);
+        if(row===null)continue;
         csv+=headers.map(h=>`"${String(row[h]??'').replace(/"/g,'""')}"`).join(',')+'\r\n';
         done++;
       }
@@ -315,7 +314,10 @@ const DB = {
 // Utilities
 // ────────────────────────────────────────────────────────────────────────────
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-function nowTs(){return new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);}
+// WITA = UTC+8, no DST — shift the instant forward then read it back out
+// through toISOString (which always renders in UTC) to get WITA wall-clock
+// digits in filenames, regardless of the machine's local timezone.
+function nowTs(){return new Date(Date.now()+8*60*60*1000).toISOString().replace(/[:.]/g,'-').slice(0,19);}
 function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function downloadBlob(blob,filename){const url=URL.createObjectURL(blob),a=Object.assign(document.createElement('a'),{href:url,download:filename});document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},1500);}
 function buildCSV(headers,rows){const l=[headers.join(',')];for(const r of rows)l.push(headers.map(h=>`"${String(r[h]??'').replace(/"/g,'""')}"`).join(','));return'\uFEFF'+l.join('\r\n');}
@@ -360,8 +362,19 @@ function extractAnswer(answer){
 }
 
 async function parseFileToIds(file){
-  const text=await file.text(),ext=file.name.split('.').pop().toLowerCase();
+  const ext=file.name.split('.').pop().toLowerCase();
   try{
+    if(ext==='xlsx'||ext==='xls'){
+      const table=await readTableFromFile(file);
+      if(!table.length)return[];
+      const hdr=table[0].map(h=>String(h??'').trim().toLowerCase());
+      let col=hdr.findIndex(h=>/assignment.?id/i.test(h));
+      if(col<0)col=hdr.findIndex(h=>/full.?code/i.test(h));
+      if(col<0)col=hdr.findIndex(h=>/code/i.test(h));
+      if(col<0)col=0;
+      return table.slice(1).map(r=>String(r[col]??'').trim()).filter(Boolean);
+    }
+    const text=await file.text();
     if(ext==='json'){
       let data=JSON.parse(text);
       if(data&&!Array.isArray(data)){for(const k of['data','results','rows','items']){if(Array.isArray(data[k])){data=data[k];break;}}}
@@ -384,15 +397,19 @@ async function parseFileToIds(file){
 // TAB 1: Region Hierarchy (in-memory, manageable size)
 // ────────────────────────────────────────────────────────────────────────────
 const T1={
-  GROUP_ID:'a45adac1-e711-4c15-b3f9-1f30fc151565',
   BASE:'https://fasih-sm.bps.go.id/app/api/region/api/v1/region',
   PARAM:{3:'level2FullCode',4:'level3FullCode',5:'level4FullCode',6:'level5FullCode'},
   NAMES:{3:'Kecamatan',4:'Desa/Kel',5:'SLS',6:'Sub-SLS'},
+  SURVEYS:{
+    se2026:{name:'SE2026',groupId:'a45adac1-e711-4c15-b3f9-1f30fc151565'},
+    pln:{name:'PLN Pascabayar 2026',groupId:'7cc6648a-f29c-461f-a880-725a5f57aa61'},
+  },
+  survey:'se2026',
   collecting:false,stopped:false,rows:[],errorItems:[],wq:null,timer:null,startMs:0,
   stats:{req:0,rows:0,err:0,active:0},lcount:{3:0,4:0,5:0,6:0},
 
   async fetchLevel(level,code,retries=3){
-    const url=`${this.BASE}/level${level}?groupId=${this.GROUP_ID}&${this.PARAM[level]}=${code}`;
+    const url=`${this.BASE}/level${level}?groupId=${this.SURVEYS[this.survey].groupId}&${this.PARAM[level]}=${code}`;
     for(let a=1;a<=retries;a++){if(this.stopped)return[];
       try{const r=await fetch(url,{credentials:'include'});if(!r.ok)throw new Error(`HTTP ${r.status}`);const j=await r.json();if(j.success&&Array.isArray(j.data))return j.data;return[];}
       catch(e){if(a===retries){this.stats.err++;this.errorItems.push({level,parentCode:code});this.log(`ERR lv${level}[${code}]: ${e.message}`,'r');return[];}await sleep(300*a);}
@@ -410,6 +427,7 @@ const T1={
   async start(){
     const l2=document.getElementById('t1-l2').value.trim(),maxLv=parseInt(document.getElementById('t1-maxlv').value),conc=parseInt(document.getElementById('t1-conc').value)||3,delay=parseInt(document.getElementById('t1-delay').value)||0;
     if(!l2)return alert('Enter a Level 2 Full Code.');
+    this.survey=document.getElementById('t1-survey').value;
     this.collecting=true;this.stopped=false;this.rows=[];this.errorItems=[];this.stats={req:0,rows:0,err:0,active:0};
     Object.keys(this.lcount).forEach(k=>this.lcount[k]=0);[3,4,5,6].forEach(l=>document.getElementById(`lc${l}`).textContent=0);
     this.wq=new WorkQueue(conc);clearLog('t1');hideDL('t1');setStatus('t1','running');this.startMs=Date.now();
@@ -419,7 +437,7 @@ const T1={
     clearInterval(this.timer);this.collecting=false;
     const sec=((Date.now()-this.startMs)/1000).toFixed(1);setStatus('t1',this.stopped?'stopped':'done');
     this.log(`Done in ${sec}s — ${this.rows.length} rows, ${this.stats.err} errors.`,this.stopped?'w':'s');
-    T2.refreshInfo();T6.refreshInfo();saveStorage('t1data',{level2FullCode:l2,collectedAt:new Date().toISOString(),rows:this.rows});showDL('t1',this.rows.length);
+    T2.refreshInfo();T6.refreshInfo();saveStorage('t1data',{level2FullCode:l2,collectedAt:new Date().toISOString(),rows:this.rows,survey:this.survey});showDL('t1',this.rows.length);
   },
   stop(){this.stopped=true;this.log('Stop...','w');document.getElementById('t1-stop').disabled=true;},
   log(msg,cls='i'){addLog('t1',msg,cls);},
@@ -551,12 +569,29 @@ const T3={
   dataKeys:new Set(),predefKeys:new Set(),// in-memory key registries (just strings, small)
   stats:{total:0,done:0,err:0,active:0},wq:null,timer:null,startMs:0,
 
-  async fetch(id,retries=3){
+  MAX_RETRIES:5,RETRY_BASE_MS:2000,NON_RETRYABLE:[400,401,403,404],
+
+  async fetch(id){
     const url=`${this.BASE}?assignmentId=${id}`;
-    for(let a=1;a<=retries;a++){if(this.stopped)return null;
-      try{const r=await fetch(url,{credentials:'include'});if(!r.ok)throw new Error(`HTTP ${r.status}`);return await r.json();}
-      catch(e){if(a===retries){this.stats.err++;await DB.add('t3_errors',{assignmentId:id});this.log(`ERR[${id}]: ${e.message}`,'r');return null;}await sleep(400*a);}
-    }return null;
+    for(let attempt=1;;attempt++){
+      if(this.stopped)return null;
+      let status=null;
+      try{
+        const r=await fetch(url,{credentials:'include'});
+        status=r.status;
+        if(!r.ok)throw new Error(`HTTP ${r.status}`);
+        return await r.json();
+      }catch(e){
+        const retryable=status===null||(!this.NON_RETRYABLE.includes(status));
+        if(!retryable||attempt>this.MAX_RETRIES){
+          this.stats.err++;await DB.add('t3_errors',{assignmentId:id});
+          this.log(`ERR[${id}]: ${e.message}`,'r');return null;
+        }
+        const delay=this.RETRY_BASE_MS*2**(attempt-1);
+        this.log(`${id}: ${e.message}, retry ${attempt}/${this.MAX_RETRIES} in ${Math.round(delay/1000)}s...`,'w');
+        await sleep(delay);
+      }
+    }
   },
 
   parseRaw(id,raw){
@@ -670,15 +705,28 @@ const T3={
 const T6={
   ENDPOINT:'https://fasih-sm.bps.go.id/app/api/analytic/api/v2/assignment/datatable-all-user-survey-periode',
   MAX_RETRIES:4,RETRY_BASE_DELAY_MS:1500,RETRYABLE_STATUSES:[429,500,502,503,504],
+  SURVEYS:{
+    se2026:{name:'SE2026',surveyPeriodId:'fd68e454-ba45-4b85-8205-f3bf777ded24'},
+    pln:{name:'PLN Pascabayar 2026',surveyPeriodId:'d63e9832-13c6-4ec7-bf5b-59229c2f90f9'},
+  },
+  survey:'se2026',
   running:false,stopped:false,errorItems:[],wq:null,sourceMode:'tab1',fileChains:[],
   stats:{chainsTotal:0,chainsDone:0,records:0,err:0,active:0},timer:null,startMs:0,
+  aggSource:'t4',aggFileMap:null,
 
   log(msg,cls='i'){addLog('t6',msg,cls);},
 
   refreshInfo(){
     const n=T1.rows.length,el=document.getElementById('t6-tab1-info');
-    if(n>0){const chains=T1.getDeepestRegionChains().length;el.innerHTML=`<strong>${n}</strong> rows from Region Hierarchy Tab &mdash; <strong>${chains}</strong> unique region chain${chains===1?'':'s'} to collect.`;}
-    else el.innerHTML='No Region Hierarchy results yet.';
+    if(n>0){
+      const chains=T1.getDeepestRegionChains().length;
+      let html=`<strong>${n}</strong> rows from Region Hierarchy Tab &mdash; <strong>${chains}</strong> unique region chain${chains===1?'':'s'} to collect.`;
+      if(T1.survey!==this.survey){
+        const t1n=T1.SURVEYS[T1.survey]?.name||T1.survey,t6n=this.SURVEYS[this.survey]?.name||this.survey;
+        html+=`<br><span style="color:var(--yellow);">&#9888; T1 was collected as <strong>${t1n}</strong> but T6 is set to <strong>${t6n}</strong> &mdash; region chains may not match.</span>`;
+      }
+      el.innerHTML=html;
+    }else el.innerHTML='No Region Hierarchy results yet.';
   },
   getSourceChains(){return this.sourceMode==='tab1'?T1.getDeepestRegionChains():this.fileChains;},
   async loadFile(file){
@@ -787,7 +835,7 @@ const T6={
     const conc=parseInt(document.getElementById('t6-conc').value)||1;
     const length=parseInt(document.getElementById('t6-length').value)||10;
     const delay=parseInt(document.getElementById('t6-delay').value)||0;
-    const surveyPeriodId=document.getElementById('t6-survey').value.trim()||T4.DEFAULT_PAYLOAD.surveyPeriodId;
+    const surveyPeriodId=this.SURVEYS[this.survey].surveyPeriodId;
 
     this.running=true;this.stopped=false;this.errorItems=[];
     this.stats={chainsTotal:chains.length,chainsDone:0,records:0,err:0,active:0};
@@ -842,7 +890,7 @@ const T6={
     const conc=parseInt(document.getElementById('t6-conc').value)||1;
     const length=parseInt(document.getElementById('t6-length').value)||10;
     const delay=parseInt(document.getElementById('t6-delay').value)||0;
-    const surveyPeriodId=document.getElementById('t6-survey').value.trim()||T4.DEFAULT_PAYLOAD.surveyPeriodId;
+    const surveyPeriodId=this.SURVEYS[this.survey].surveyPeriodId;
 
     this.running=true;this.stopped=false;this.errorItems=[];
     this.stats={chainsTotal:chains.length,chainsDone:0,records:0,err:0,active:0};
@@ -853,13 +901,19 @@ const T6={
     this.log(`Retrying ${chains.length} failed region chain(s) — merging into existing results`,'s');
     updateStatsT6();
 
+    // One combined-predicate scan over t6_results up front, instead of one
+    // full-store cursor per chain — chains.length separate scans (run
+    // concurrently, contending for the same store's write lock) was the
+    // main cost of a T6 retry when the DB already held a lot of rows.
+    this.log(`Clearing previously-collected rows for the ${chains.length} chain(s) being retried...`,'i');
+    const cleared=await DB.deleteWhere('t6_results',row=>
+      chains.some(({chain})=>Object.entries(chain).every(([lvl,id])=>String(row[`region${lvl}Id`]??'')===String(id)))
+    );
+    if(cleared)this.log(`Cleared ${cleared} stale row(s) from chains being retried.`,'i');
+
     await Promise.all(chains.map(chainInfo=>this.wq.run(async()=>{
       if(this.stopped)return;
       this.stats.active++;updateStatsT6();
-      await DB.deleteWhere('t6_results',row=>{
-        for(const[lvl,id]of Object.entries(chainInfo.chain))if(String(row[`region${lvl}Id`]??'')!==String(id))return false;
-        return true;
-      });
       this.log(`Retry region chain: ${JSON.stringify(chainInfo.chain)}`,'i');
       await this.collectChain(chainInfo,length,delay,surveyPeriodId);
       this.stats.active--;this.stats.chainsDone++;
@@ -890,6 +944,141 @@ const T6={
     this.log(`Exported ${this.errorItems.length} chain error entries`,'s');
   },
   async clearDB(){if(!confirm('Clear all Assignment Status data from the local database?'))return;await DB.clear('t6_results');this.errorItems=[];hideDL('t6');updateErrBtn('t6',0);this.log('DB cleared','w');},
+
+  // ── Aggregate by email: join T6 × T1 (region6Id→fullCode) × T4 (regionCode→email) ──
+  countUsahaKeluarga(v){
+    if(v==null)return{usaha:0,keluarga:0};
+    const x=String(v).trim();
+    if(!x||x==='-')return{usaha:0,keluarga:0};
+    if(x.includes('DUMMY'))return{usaha:0,keluarga:0};
+    const countItems=s=>s.split(',').filter(i=>i.trim()).length;
+    if(!x.includes('/')){
+      if(x==='KELUARGA')return{usaha:0,keluarga:1};
+      return{usaha:countItems(x),keluarga:0};
+    }
+    const si=x.indexOf('/');
+    const left=x.slice(0,si).trim(),right=x.slice(si+1).trim();
+    let usaha=0,keluarga=0;
+    if(left!=='-')usaha+=countItems(left);
+    if(right==='KELUARGA')keluarga=1;
+    else if(right!=='-'&&!right.includes('DUMMY'))usaha+=countItems(right);
+    return{usaha,keluarga};
+  },
+
+  buildRegion6Map(){
+    const m=new Map();
+    for(const row of T1.rows){const l6=row['level6'];if(l6?.id&&l6?.fullCode)m.set(String(l6.id),l6.fullCode);}
+    return m;
+  },
+
+  buildCodeEmailMap(){
+    if(this.aggSource==='file'){
+      if(!this.aggFileMap)throw new Error('No T4 file loaded. Upload a Report Progress export first.');
+      return this.aggFileMap;
+    }
+    if(!T4.collected.length)throw new Error('No Report Progress data in T4 tab. Run T4 first, or switch to Upload File source.');
+    const m=new Map();
+    for(const row of T4.explodeRegionSummary()){if(row.email&&row.regionCode)m.set(String(row.regionCode),String(row.email));}
+    return m;
+  },
+
+  refreshAggT4Info(){
+    const el=document.getElementById('t6-agg-t4-info');
+    if(!el)return;
+    const n=T4.collected.length;
+    el.innerHTML=n>0?`<strong>${n}</strong> record${n===1?'':'s'} from Report Progress tab (${T4.explodeRegionSummary().length} exploded rows).`:'No Report Progress data in T4 tab yet. Run the Report Progress tab first.';
+  },
+
+  async loadAggFile(file){
+    try{
+      const map=await parseProgressLookupFile(file);
+      this.aggFileMap=map;
+      const info=document.getElementById('t6-agg-file-info');
+      info.style.display='block';
+      info.innerHTML=`<strong>${map.size}</strong> regionCode→email entries loaded from <em>${escHtml(file.name)}</em>.`;
+      document.getElementById('t6-agg-ready-info').textContent=`${map.size} email entries from file.`;
+      this.log(`Loaded ${map.size} regionCode→email entries from ${file.name}`,'s');
+    }catch(e){
+      const info=document.getElementById('t6-agg-file-info');
+      info.style.display='block';
+      info.innerHTML=`<strong style="color:var(--red);">Failed:</strong> ${escHtml(e.message)}`;
+      this.log(`T4 file load error: ${e.message}`,'r');
+    }
+  },
+
+  async aggregateWithProgress(){
+    if(!T1.rows.length)throw new Error('No Region Hierarchy data in T1. Run the Region Hierarchy tab first (needed to map region6Id → fullCode).');
+    const region6Map=this.buildRegion6Map();
+    const codeEmailMap=this.buildCodeEmailMap();
+    const pivot=new Map(); // email → {[status]: {usaha, keluarga}}
+    const statusSet=new Set();
+    let joined=0,skipped=0,total=0;
+    await DB.stream('t6_results',1000,async chunk=>{
+      for(const row of chunk){
+        total++;
+        const r6id=String(row.region6Id??'');
+        const fullCode=region6Map.get(r6id);
+        if(!fullCode){skipped++;continue;}
+        const email=codeEmailMap.get(fullCode);
+        if(!email){skipped++;continue;}
+        joined++;
+        const status=String(row.assignmentStatusAlias??'(unknown)');
+        statusSet.add(status);
+        const{usaha,keluarga}=this.countUsahaKeluarga(row.data6);
+        if(!pivot.has(email))pivot.set(email,{});
+        const byStatus=pivot.get(email);
+        if(!byStatus[status])byStatus[status]={usaha:0,keluarga:0};
+        byStatus[status].usaha+=usaha;
+        byStatus[status].keluarga+=keluarga;
+      }
+    });
+    this.log(`Aggregate: ${joined}/${total} rows joined (${skipped} unmatched), ${pivot.size} emails, ${statusSet.size} statuses`,'i');
+    if(!pivot.size)throw new Error('No rows could be joined. Ensure T1 and T4 were collected for the same region/period as T6.');
+    const statuses=[...statusSet].sort();
+    const rows=[];
+    for(const[email,byStatus]of pivot){
+      const row={email};
+      for(const s of statuses){row[`usaha_${s}`]=byStatus[s]?.usaha||0;row[`keluarga_${s}`]=byStatus[s]?.keluarga||0;}
+      const uTot=statuses.reduce((a,s)=>a+(row[`usaha_${s}`]||0),0);
+      const kTot=statuses.reduce((a,s)=>a+(row[`keluarga_${s}`]||0),0);
+      row.usaha_total=uTot;row.keluarga_total=kTot;
+      const uOpen=row['usaha_OPEN']||0,kOpen=row['keluarga_OPEN']||0;
+      const uDraft=row['usaha_DRAFT']||0,kDraft=row['keluarga_DRAFT']||0;
+      row.usaha_progress=uTot>0?(uTot-uOpen)/uTot:0;
+      row.keluarga_progress=kTot>0?(kTot-kOpen)/kTot:0;
+      row.usaha_submitted=uTot>0?(uTot-uOpen-uDraft)/uTot:0;
+      row.keluarga_submitted=kTot>0?(kTot-kOpen-kDraft)/kTot:0;
+      row.usaha_approved=uTot>0?(row['usaha_APPROVED BY Pengawas']||0)/uTot:0;
+      row.keluarga_approved=kTot>0?(row['keluarga_APPROVED BY Pengawas']||0)/kTot:0;
+      rows.push(row);
+    }
+    return{rows,statuses};
+  },
+
+  async exportAggregateCSV(){
+    showExportProgress('Building aggregate table...');
+    try{
+      const{rows,statuses}=await this.aggregateWithProgress();
+      const statusCols=statuses.flatMap(s=>[`usaha_${s}`,`keluarga_${s}`]);
+      const headers=['email',...statusCols,'usaha_total','keluarga_total','usaha_progress','keluarga_progress','usaha_submitted','keluarga_submitted','usaha_approved','keluarga_approved'];
+      downloadBlob(new Blob([buildCSV(headers,rows)],{type:'text/csv;charset=utf-8'}),`assignment_status_by_email_${nowTs()}.csv`);
+      this.log(`Aggregate CSV exported: ${rows.length} rows`,'s');
+    }catch(e){this.log(`Aggregate error: ${e.message}`,'r');alert(e.message);}
+    finally{hideExportProgress();}
+  },
+
+  async exportAggregateXLSX(){
+    showExportProgress('Building aggregate XLSX...');
+    try{
+      const{rows,statuses}=await this.aggregateWithProgress();
+      const statusCols=statuses.flatMap(s=>[`usaha_${s}`,`keluarga_${s}`]);
+      const headers=['email',...statusCols,'usaha_total','keluarga_total','usaha_progress','keluarga_progress','usaha_submitted','keluarga_submitted','usaha_approved','keluarga_approved'];
+      const xlsx=await buildXLSXFromArray('By Email',headers,rows,(d,t)=>updateExportProgress(d,t));
+      if(!exportCancelled)downloadBlob(new Blob([xlsx],{type:XLSX_MIME}),`assignment_status_by_email_${nowTs()}.xlsx`);
+      this.log('Aggregate XLSX exported','s');
+    }catch(e){this.log(`Aggregate XLSX error: ${e.message}`,'r');alert(e.message);}
+    finally{hideExportProgress();}
+  },
 };
 function setStatusT6(state){
   const b=document.getElementById('t6-badge');
@@ -922,12 +1111,18 @@ const T4={
   STORAGE_KEY:'t4Progress',
   MAX_PAGES:2000,DELAY_MS:300,MAX_RETRIES:4,RETRY_BASE_DELAY_MS:1500,
   RETRYABLE_STATUSES:[429,500,502,503,504],
-  DEFAULT_PAYLOAD:{
-    surveyPeriodId:'fd68e454-ba45-4b85-8205-f3bf777ded24',
-    surveyRoleId:'6d7d919a-45e5-4779-bb87-2905b49fd31a',
-    size:10,page:0,search:'',target:'TARGET_ONLY', // this endpoint's "page" is 0-indexed
-    region:{region1Id:null,region2Id:null,region3Id:null,region4Id:null,region5Id:null,region6Id:null,region7Id:null,region8Id:null,region9Id:null,region10Id:null},
-    regionSummaryLevel:6
+  SURVEY_PERIOD_ID:'fd68e454-ba45-4b85-8205-f3bf777ded24',
+  ROLE_IDS:{pencacah:'6d7d919a-45e5-4779-bb87-2905b49fd31a',pengawas:'93bcf446-c4c1-4462-8ed0-4b0f7ae89e52'},
+  role:'pencacah',
+  buildPayload(){
+    const size=Math.min(10,Math.max(1,parseInt(document.getElementById('t4-size').value)||10));
+    return{
+      surveyPeriodId:this.SURVEY_PERIOD_ID,
+      surveyRoleId:this.ROLE_IDS[this.role],
+      size,page:0,search:'',target:'TARGET_ONLY',
+      region:{region1Id:null,region2Id:null,region3Id:null,region4Id:null,region5Id:null,region6Id:null,region7Id:null,region8Id:null,region9Id:null,region10Id:null},
+      regionSummaryLevel:6
+    };
   },
   collecting:false,stopped:false,collected:[],resumeState:null,pendingResume:null,
   stats:{page:0,records:0,err:0},timer:null,startMs:0,
@@ -1004,16 +1199,9 @@ const T4={
     let basePayload,startPage,seed=[];
     if(this.resumeState){
       basePayload=this.resumeState.basePayload;seed=this.resumeState.collected;startPage=this.resumeState.lastPage+1;
-      document.getElementById('t4-payload').value=JSON.stringify(basePayload,null,2);
     }else{
-      try{basePayload=JSON.parse(document.getElementById('t4-payload').value);}
-      catch(e){this.log('Payload is not valid JSON. Fix it and try again.','r');return;}
-      // Don't use `|| 0` here — this endpoint's page is 0-indexed, and
-      // `Number(0) || 0` is fine, but `||` would also clobber an explicit 0
-      // with a fallback if the fallback weren't 0 too. Being explicit about
-      // the NaN check keeps an intentional page:0 from ever being coerced.
-      const parsedPage=Number(basePayload.page);
-      startPage=Number.isFinite(parsedPage)?parsedPage:0;
+      basePayload=this.buildPayload();
+      startPage=0;
     }
     this.resumeState=null;this.collecting=true;this.stopped=false;this.collected=seed;
     this.stats={page:0,records:seed.length,err:0};
@@ -1140,7 +1328,8 @@ const T4={
   TOTAL_STATUS_KEYS:['status.OPEN','status.SUBMITTED BY Pencacah','status.DRAFT','status.APPROVED BY Pengawas','status.REJECTED BY Pengawas','status.EDITED BY Pengawas','status.REVOKED BY Pengawas','status.SUBMITTED RESPONDENT','status.REJECTED BY Admin Kabupaten'],
   SUBMITTED_STATUS_KEYS:['status.SUBMITTED BY Pencacah','status.APPROVED BY Pengawas','status.REJECTED BY Pengawas','status.EDITED BY Pengawas','status.REVOKED BY Pengawas','status.SUBMITTED RESPONDENT','status.REJECTED BY Admin Kabupaten'],
   PROGRESS_STATUS_KEYS:['status.SUBMITTED BY Pencacah','status.DRAFT','status.APPROVED BY Pengawas','status.REJECTED BY Pengawas','status.EDITED BY Pengawas','status.REVOKED BY Pengawas','status.SUBMITTED RESPONDENT','status.REJECTED BY Admin Kabupaten'],
-  COMPUTED_COLS:['total_assignment','submitted','submitted_percentage','progress','progress_percentage'],
+  COMPUTED_COLS:['total_assignment','submitted','submitted_percentage','progress','progress_percentage',
+                 'total_assignment_prelist','submitted_prelist','submitted_percentage_prelist','progress_prelist','progress_percentage_prelist'],
   statusSum(row,keys){return keys.reduce((s,k)=>s+(Number(row[k])||0),0);},
   addStatusAggregates(row){
     const total=this.statusSum(row,this.TOTAL_STATUS_KEYS);
@@ -1192,6 +1381,82 @@ const T4={
     const field=this.findUsernameField(this.buildExportRows());
     return this.aggregateBy('username',row=>field?String(row[field]??'(unknown)'):'(unknown)');
   },
+  // ── Prelist comparison ──
+  prelistSource:'tab8',prelistMaps:null,
+  PRELIST_INDICATOR:'Jumlah Keluarga Prelist Awal',
+
+  computePrelistMaps(rows){
+    const subSlsMap=new Map();
+    for(const row of rows){
+      const key=String(row.id_wilayah||'');
+      if(!key)continue;
+      subSlsMap.set(key,Number(row.total_value)||0);
+    }
+    return{subSlsMap};
+  },
+
+  async buildPrelistFromTab8(){
+    const ind=this.PRELIST_INDICATOR;
+    const rows=[];
+    await DB.stream('t8_results',1000,async chunk=>{
+      for(const row of chunk)if(String(row.nama_indikator||'')===ind)rows.push({id_wilayah:row.id_wilayah,total_value:row.total_value});
+    });
+    if(!rows.length)throw new Error(`No rows with nama_indikator="${ind}" in Prelist tab. Run the Prelist tab first.`);
+    return this.computePrelistMaps(rows);
+  },
+
+  async loadPrelistFile(file){
+    const info=document.getElementById('t4-prelist-file-info');
+    info.style.display='block';
+    try{
+      const table=await readTableFromFile(file);
+      const hdr=table[0].map(h=>String(h??'').trim().toLowerCase());
+      const colIdx=requireColumns(hdr,['id_wilayah','total_value']);
+      const rows=[];
+      for(let i=1;i<table.length;i++){
+        const r=table[i];if(!r||r.every(v=>v==null||v===''))continue;
+        rows.push({id_wilayah:String(r[colIdx.id_wilayah]??'').trim(),total_value:r[colIdx.total_value]});
+      }
+      if(!rows.length)throw new Error('No data rows found in file.');
+      this.prelistMaps=this.computePrelistMaps(rows);
+      info.innerHTML=`<strong>${rows.length}</strong> rows loaded from <em>${escHtml(file.name)}</em> — <strong>${this.prelistMaps.subSlsMap.size}</strong> sub-SLS entries.`;
+      addLog('t4',`Prelist file: ${rows.length} rows, ${this.prelistMaps.subSlsMap.size} sub-SLS entries`,'s');
+    }catch(e){
+      this.prelistMaps=null;
+      info.innerHTML=`<strong style="color:var(--red);">Failed:</strong> ${escHtml(e.message)}`;
+    }
+  },
+
+  async refreshPrelistTab8Info(){
+    const el=document.getElementById('t4-prelist-tab8-info');
+    if(!el)return;
+    const ind=this.PRELIST_INDICATOR;
+    let count=0;
+    await DB.stream('t8_results',1000,async chunk=>{for(const r of chunk)if(String(r.nama_indikator||'')===ind)count++;});
+    el.innerHTML=count>0
+      ?`<strong>${count}</strong> rows with "<em>${escHtml(ind)}</em>" in Prelist tab.`
+      :`No rows for "<em>${escHtml(ind)}</em>" yet. Run the Prelist tab first.`;
+  },
+
+  async applyPrelistToRows(rows){
+    if(!document.getElementById('t4-prelist-compare')?.checked)return rows;
+    try{
+      if(this.prelistSource==='tab8')this.prelistMaps=await this.buildPrelistFromTab8();
+    }catch(e){addLog('t4',`Prelist: ${e.message}`,'r');return rows;}
+    if(!this.prelistMaps)return rows;
+    const{subSlsMap}=this.prelistMaps;
+    return rows.map(r=>{
+      const prelist=subSlsMap.get(String(r.regionCode||''))||0;
+      const sub=Number(r.submitted)||0,prog=Number(r.progress)||0;
+      r.total_assignment_prelist=prelist;
+      r.submitted_prelist=sub;
+      r.submitted_percentage_prelist=prelist>0?Number((sub/prelist*100).toFixed(2)):0;
+      r.progress_prelist=prog;
+      r.progress_percentage_prelist=prelist>0?Number((prog/prelist*100).toFixed(2)):0;
+      return r;
+    });
+  },
+
   // Computed columns are pulled out and appended last regardless of where
   // they fall in each row's own key order, so they consistently land at
   // the end of the exported header row.
@@ -1223,24 +1488,24 @@ const T4={
     document.getElementById('t4-dl-noun').textContent=meta.noun;
   },
 
-  exportJSON(){
+  async exportJSON(){
     if(!this.collected.length)return alert('No data.');
     const level=this.selectedLevel(),meta=this.LEVEL_META[level];
-    const data=level==='raw'?this.collected:this.levelRows(level);
+    const data=level==='raw'?this.collected:await this.applyPrelistToRows(this.levelRows(level));
     downloadBlob(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),`${meta.base}_${nowTs()}.json`);
     this.log(`Exported ${meta.noun} JSON`,'s');
   },
-  exportCSV(){
+  async exportCSV(){
     if(!this.collected.length)return alert('No data.');
     const level=this.selectedLevel(),meta=this.LEVEL_META[level];
-    const rows=this.levelRows(level),headers=this.headerUnion(rows);
+    const rows=await this.applyPrelistToRows(this.levelRows(level)),headers=this.headerUnion(rows);
     downloadBlob(new Blob([buildCSV(headers,rows)],{type:'text/csv;charset=utf-8'}),`${meta.base}_${nowTs()}.csv`);
     this.log(`Exported ${meta.noun} CSV`,'s');
   },
   async exportXLSX(){
     if(!this.collected.length)return alert('No data.');
     const level=this.selectedLevel(),meta=this.LEVEL_META[level];
-    const rows=this.levelRows(level),headers=this.headerUnion(rows);
+    const rows=await this.applyPrelistToRows(this.levelRows(level)),headers=this.headerUnion(rows);
     showExportProgress('Building XLSX...');
     try{const xlsx=await buildXLSXFromArray(meta.sheet,headers,rows,(d,t)=>updateExportProgress(d,t));if(!exportCancelled)downloadBlob(new Blob([xlsx],{type:XLSX_MIME}),`${meta.base}_${nowTs()}.xlsx`);}
     finally{hideExportProgress();}
@@ -1265,6 +1530,7 @@ const T7={
   fetching:false,stopped:false,
   store:{usaha:{data:[],headers:[]},keluarga:{data:[],headers:[]}},
   enrichSource:'api',enrichFileMap:null,
+  statusEnrichSource:'api',statusEnrichFileMap:null,
 
   log(msg,cls='i'){addLog('t7',msg,cls);},
 
@@ -1333,12 +1599,26 @@ const T7={
 
   ASSIGNMENT_BASE:'https://fasih-sm.bps.go.id/app/api/assignment-general/api/assignment/get-by-assignment-id',
 
-  async fetchAssignment(id,retries=3){
+  MAX_FETCH_RETRIES:5,FETCH_RETRY_BASE_MS:2000,FETCH_NON_RETRYABLE:[400,401,403,404],
+
+  async fetchAssignment(id){
     const url=`${this.ASSIGNMENT_BASE}?assignmentId=${id}`;
-    for(let a=1;a<=retries;a++){if(this.stopped)return null;
-      try{const r=await fetch(url,{credentials:'include'});if(!r.ok)throw new Error(`HTTP ${r.status}`);return await r.json();}
-      catch(e){if(a===retries){this.log(`ERR[${id}]: ${e.message}`,'r');return null;}await sleep(400*a);}
-    }return null;
+    for(let attempt=1;;attempt++){
+      if(this.stopped)return null;
+      let status=null;
+      try{
+        const r=await fetch(url,{credentials:'include'});
+        status=r.status;
+        if(!r.ok)throw new Error(`HTTP ${r.status}`);
+        return await r.json();
+      }catch(e){
+        const retryable=status===null||(!this.FETCH_NON_RETRYABLE.includes(status));
+        if(!retryable||attempt>this.MAX_FETCH_RETRIES){this.log(`ERR[${id}]: ${e.message}`,'r');return null;}
+        const delay=this.FETCH_RETRY_BASE_MS*2**(attempt-1);
+        this.log(`${id}: ${e.message}, retry ${attempt}/${this.MAX_FETCH_RETRIES} in ${Math.round(delay/1000)}s...`,'w');
+        await sleep(delay);
+      }
+    }
   },
 
   // Builds an assignmentId→{data1,data2} map from whichever source is
@@ -1429,6 +1709,93 @@ const T7={
     this.log(`Done — ${stats.total-stats.err} fetched ok, ${stats.err} fetch errors, ${matched}/${total} record(s) matched.`,stats.err?'w':'s');
   },
 
+  // ── Status enrichment: merges assignmentStatusAlias into anomaly rows ──
+
+  async buildStatusLookupFromTab6(){
+    const map=new Map();
+    await DB.stream('t6_results',1000,async chunk=>{
+      for(const r of chunk)if(r.id&&r.assignmentStatusAlias)map.set(String(r.id),String(r.assignmentStatusAlias));
+    });
+    return map;
+  },
+
+  refreshTab6Info(){
+    DB.count('t6_results').then(n=>{
+      const el=document.getElementById('t7-status-tab6-info');
+      if(el)el.innerHTML=n>0?`<strong>${n}</strong> rows in the Assignment Status Tab's local database.`:'No Assignment Status Tab results yet. Run T6 first.';
+    });
+  },
+
+  async loadStatusFile(file){
+    try{
+      const map=await parseStatusLookupFile(file);
+      this.statusEnrichFileMap=map;
+      const info=document.getElementById('t7-status-file-info');
+      info.style.display='block';
+      info.innerHTML=`<strong>${map.size}</strong> status entries loaded from <em>${escHtml(file.name)}</em>.`;
+      this.log(`Loaded ${map.size} status entries from ${file.name}`,'s');
+    }catch(e){
+      this.statusEnrichFileMap=null;
+      const info=document.getElementById('t7-status-file-info');
+      info.style.display='block';
+      info.innerHTML=`<strong style="color:var(--red);">Failed:</strong> ${escHtml(e.message)}`;
+      this.log(`Status file error: ${e.message}`,'r');
+    }
+  },
+
+  applyStatusLookup(cache){
+    let matched=0,total=0;
+    ['usaha','keluarga'].forEach(t=>{
+      this.store[t].data.forEach(r=>{
+        total++;
+        const status=r.assignment_id?cache.get(r.assignment_id):null;
+        if(status!=null)matched++;
+        r.assignmentStatusAlias=status??'';
+      });
+      if(!this.store[t].headers.includes('assignmentStatusAlias'))this.store[t].headers.push('assignmentStatusAlias');
+    });
+    return{matched,total};
+  },
+
+  async enrichViaApiForStatus(){
+    const ids=new Set();
+    ['usaha','keluarga'].forEach(t=>this.store[t].data.forEach(r=>{if(r.assignment_id)ids.add(r.assignment_id);}));
+    const idList=[...ids];
+    if(!idList.length)return;
+    const conc=parseInt(document.getElementById('t7-status-conc').value)||2;
+    const delay=parseInt(document.getElementById('t7-status-delay').value)||0;
+    const stats={total:idList.length,done:0,err:0};
+    const wq=new WorkQueue(conc);
+    this.log(`Status enrich: ${idList.length} assignment_id(s) via Live API`,'s');
+    const cache=new Map();
+    await Promise.all(idList.map(id=>async()=>{
+      if(this.stopped)return;
+      const j=await wq.run(async()=>{const d=await this.fetchAssignment(id);if(delay>0)await sleep(delay);return d;});
+      stats.done++;
+      if(j?.success&&j?.data?.assignmentStatusAlias!=null){
+        cache.set(id,String(j.data.assignmentStatusAlias));this.log(`OK[${id}] → ${j.data.assignmentStatusAlias}`,'i');
+      }else stats.err++;
+    }).map(t=>t()));
+    const{matched,total}=this.applyStatusLookup(cache);
+    this.log(`Status done — ${stats.total-stats.err} fetched, ${stats.err} errors, ${matched}/${total} matched.`,stats.err?'w':'s');
+  },
+
+  async enrichStatus(){
+    if(this.statusEnrichSource==='api')return this.enrichViaApiForStatus();
+    let cache;
+    if(this.statusEnrichSource==='tab6'){
+      cache=await this.buildStatusLookupFromTab6();
+      if(!cache.size){this.log('No Assignment Status data in T6 DB. Run the Assignment Status tab first.','r');return;}
+      this.log(`Using ${cache.size} status entries from Assignment Status Tab DB`,'i');
+    }else{
+      if(!this.statusEnrichFileMap){this.log('No status file loaded — upload an Assignment Status export first.','r');return;}
+      cache=this.statusEnrichFileMap;
+      this.log(`Using ${cache.size} status entries from uploaded file`,'i');
+    }
+    const{matched,total}=this.applyStatusLookup(cache);
+    this.log(`Status done — ${matched}/${total} record(s) matched.`,matched<total?'w':'s');
+  },
+
   async fetch(){
     if(this.fetching)return;
     this.fetching=true;this.stopped=false;
@@ -1443,6 +1810,7 @@ const T7={
     try{
       this.store.usaha=await this.fetchLoop('usaha');
       if(!this.stopped)this.store.keluarga=await this.fetchLoop('keluarga');
+      if(!this.stopped&&document.getElementById('t7-status-enrich').checked)await this.enrichStatus();
       if(!this.stopped&&document.getElementById('t7-enrich').checked)await this.enrichAssignments();
       const total=this.store.usaha.data.length+this.store.keluarga.data.length;
       document.getElementById('t7-records').textContent=total;
@@ -1465,16 +1833,33 @@ const T7={
 
   selectedType(){return document.getElementById('t7-type-dl').value;},
   current(){return this.store[this.selectedType()];},
+
+  mergedStore(){
+    const hSet=new Set(['type']);
+    ['usaha','keluarga'].forEach(t=>this.store[t].headers.forEach(h=>hSet.add(h)));
+    const headers=[...hSet];
+    const data=[
+      ...this.store.usaha.data.map(r=>({type:'usaha',...r})),
+      ...this.store.keluarga.data.map(r=>({type:'keluarga',...r})),
+    ];
+    return{data,headers};
+  },
+
+  resolveStore(){
+    const type=this.selectedType();
+    return type==='merged'?this.mergedStore():this.store[type]||{data:[],headers:[]};
+  },
+
   updateDlCount(){
-    const c=this.current();
-    document.getElementById('t7-dl-count').textContent=c.data.length;
+    const{data}=this.resolveStore();
+    document.getElementById('t7-dl-count').textContent=data.length;
   },
 
   rowFlat(r,headers){const f={};headers.forEach(h=>f[h]=String(r[h]??''));return f;},
 
   exportJSON(){
     const type=this.selectedType();
-    const{data,headers}=this.store[type]||{data:[],headers:[]};
+    const{data,headers}=this.resolveStore();
     this.log(`Exporting JSON — type: ${type}, records: ${data.length}`,'i');
     if(!data.length)return alert('No data for '+type+'.');
     downloadBlob(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),`anomaly_${type}_${nowTs()}.json`);
@@ -1482,7 +1867,7 @@ const T7={
   },
   exportCSV(){
     const type=this.selectedType();
-    const{data,headers}=this.store[type]||{data:[],headers:[]};
+    const{data,headers}=this.resolveStore();
     this.log(`Exporting CSV — type: ${type}, records: ${data.length}`,'i');
     if(!data.length)return alert('No data for '+type+'.');
     const rows=data.map(r=>this.rowFlat(r,headers));
@@ -1491,7 +1876,7 @@ const T7={
   },
   async exportXLSX(){
     const type=this.selectedType();
-    const{data,headers}=this.store[type]||{data:[],headers:[]};
+    const{data,headers}=this.resolveStore();
     this.log(`Exporting XLSX — type: ${type}, records: ${data.length}`,'i');
     if(!data.length)return alert('No data for '+type+'.');
     const rows=data.map(r=>this.rowFlat(r,headers));
@@ -1908,6 +2293,79 @@ async function parseAssignmentLookupFile(file){
   return map;
 }
 
+// T6 (Assignment Status) export — builds Map<id, assignmentStatusAlias>.
+// Accepts JSON (array of T6 rows) or tabular CSV/XLSX with id + assignmentStatusAlias columns.
+async function parseStatusLookupFile(file){
+  const ext=file.name.split('.').pop().toLowerCase();
+  const map=new Map();
+  if(ext==='json'){
+    let data=JSON.parse(await file.text());
+    if(data&&!Array.isArray(data)){for(const k of['data','results','rows','items','content']){if(Array.isArray(data[k])){data=data[k];break;}}}
+    if(!Array.isArray(data))data=[data];
+    for(const r of data){
+      if(!r||typeof r!=='object')continue;
+      const idKey=Object.keys(r).find(k=>/^id$/i.test(k));
+      const stKey=Object.keys(r).find(k=>/^assignmentstatusalias$/i.test(k));
+      if(!idKey||!stKey)continue;
+      const id=String(r[idKey]??'').trim();
+      if(id)map.set(id,String(r[stKey]??''));
+    }
+    if(!map.size)throw new Error('No id+assignmentStatusAlias pairs found in JSON. Expected T6 export format.');
+    return map;
+  }
+  const table=await readTableFromFile(file);
+  const headerRow=table[0].map(h=>String(h??'').trim().toLowerCase());
+  const colIdx=requireColumns(headerRow,['id','assignmentstatusalias']);
+  for(let i=1;i<table.length;i++){
+    const r=table[i];
+    if(!r||r.every(v=>v===undefined||v===null||v===''))continue;
+    const id=String(r[colIdx.id]??'').trim();
+    if(id)map.set(id,String(r[colIdx.assignmentstatusalias]??''));
+  }
+  if(!map.size)throw new Error('No id+assignmentStatusAlias pairs found. Check the file has non-empty id and assignmentStatusAlias columns.');
+  return map;
+}
+
+// T4 (Report Progress) export — builds Map<regionCode, email>.
+// Accepts both the raw JSON export (array of T4 API records with nested
+// regionSummary) and the exploded CSV/XLSX export (one row per region with
+// flat email + regionCode columns).
+async function parseProgressLookupFile(file){
+  const ext=file.name.split('.').pop().toLowerCase();
+  const map=new Map();
+  if(ext==='json'){
+    let data=JSON.parse(await file.text());
+    if(data&&!Array.isArray(data)){for(const k of['data','results','rows','items','content']){if(Array.isArray(data[k])){data=data[k];break;}}}
+    if(!Array.isArray(data))data=[data];
+    for(const r of data){
+      if(!r||typeof r!=='object')continue;
+      const email=String(r.email??r.Email??'').trim();if(!email)continue;
+      // Raw T4 JSON: regionSummary array with regionCode per entry
+      if(Array.isArray(r.regionSummary)){
+        for(const rs of r.regionSummary){const rc=String(rs?.regionCode??'').trim();if(rc)map.set(rc,email);}
+      }else{
+        // Already-exploded: flat regionCode field
+        const rc=String(r.regionCode??r.RegionCode??'').trim();
+        if(rc)map.set(rc,email);
+      }
+    }
+    if(!map.size)throw new Error('No email+regionCode pairs found in JSON. Expected T4 export format.');
+    return map;
+  }
+  const table=await readTableFromFile(file);
+  const headerRow=table[0].map(h=>String(h??'').trim().toLowerCase());
+  const colIdx=requireColumns(headerRow,['email','regioncode']);
+  for(let i=1;i<table.length;i++){
+    const r=table[i];
+    if(!r||r.every(v=>v===undefined||v===null||v===''))continue;
+    const email=String(r[colIdx.email]??'').trim();
+    const rc=String(r[colIdx.regioncode]??'').trim();
+    if(email&&rc)map.set(rc,email);
+  }
+  if(!map.size)throw new Error('No email+regionCode pairs found. Check the file has non-empty email and regionCode columns.');
+  return map;
+}
+
 function parseDelimitedText(text){
   const lines=text.replace(/\r/g,'').split('\n').filter(l=>l.length>0);
   const delim=lines[0]&&lines[0].includes('\t')&&!lines[0].includes(',')?'\t':',';
@@ -2005,9 +2463,230 @@ function setStatus5(state){
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// T8 — Prelist (sub-SLS aggregate from dashboard-se2026)
+// ────────────────────────────────────────────────────────────────────────────
+const T8={
+  BASE:'https://dashboard-se2026.apps.bps.go.id/api/agregat/fasih',
+  INDICATORS:'1,2,108,109,110,10242,10244,10245,10246,10247,10264,10265,10266,14,10268,10271',
+  HEADERS:['id_wilayah','nama_wilayah','level_wilayah','nama_provinsi','nama_kabupaten',
+           'nama_kecamatan','nama_desa','nama_sls','is_agregat',
+           'kode_indikator','nama_indikator','satuan','total_value','updated_at'],
+  MAX_RETRIES:5,RETRY_BASE_MS:2000,NON_RETRYABLE:[400,401,403,404],
+
+  collecting:false,stopped:false,wq:null,timer:null,startMs:0,
+  stats:{kec:0,desa:0,sls:0,subslsDone:0,records:0,err:0},
+
+  log(msg,cls='i'){addLog('t8',msg,cls);},
+
+  async fetchLevel(level,paramName,paramValue){
+    const url=`${this.BASE}?level=${level}&indikator=${this.INDICATORS}&${paramName}=${encodeURIComponent(paramValue)}`;
+    for(let attempt=1;;attempt++){
+      if(this.stopped)return null;
+      let status=null;
+      try{
+        const r=await fetch(url,{credentials:'include'});
+        status=r.status;
+        if(!r.ok)throw Object.assign(new Error(`HTTP ${r.status}`),{status});
+        return await r.json();
+      }catch(e){
+        const retryable=status===null||!this.NON_RETRYABLE.includes(status);
+        if(!retryable||attempt>this.MAX_RETRIES){
+          this.stats.err++;
+          this.log(`ERR ${level}[${paramValue}]: ${e.message}`,'r');
+          return null;
+        }
+        const delay=this.RETRY_BASE_MS*2**(attempt-1);
+        this.log(`${level}[${paramValue}]: ${e.message}, retry ${attempt}/${this.MAX_RETRIES} in ${Math.round(delay/1000)}s...`,'w');
+        await sleep(delay);
+      }
+    }
+  },
+
+  // Deduplicate by slicing id_wilayah to the given prefix length
+  extractCodes(rows,prefixLen){
+    const seen=new Set();
+    for(const row of(rows||[])){
+      const code=String(row.id_wilayah||'').slice(0,prefixLen);
+      if(code)seen.add(code);
+    }
+    return [...seen];
+  },
+
+  updateStats(){
+    const s=this.stats;
+    const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+    set('t8-kec',s.kec);
+    set('t8-desa',s.desa);
+    set('t8-sls',s.sls);
+    set('t8-subsls-done',s.subslsDone);set('t8-subsls',s.sls);
+    set('t8-records',s.records);set('t8-err',s.err);
+    const p=document.getElementById('t8-prog');
+    if(p)p.style.width=(s.sls>0?s.subslsDone/s.sls*100:0)+'%';
+  },
+
+  async start(){
+    const kab=document.getElementById('t8-kab').value.trim();
+    if(!kab)return alert('Enter a Kabupaten Code.');
+    const conc=parseInt(document.getElementById('t8-conc').value)||3;
+    const delay=parseInt(document.getElementById('t8-delay').value)||0;
+
+    this.collecting=true;this.stopped=false;
+    await DB.clear('t8_results');
+    this.stats={kec:0,desa:0,sls:0,subslsDone:0,records:0,err:0};
+    clearLog('t8');hideDL('t8');
+    document.getElementById('t8-start').disabled=true;
+    document.getElementById('t8-stop').disabled=false;
+    document.getElementById('t8-badge').textContent='Running';
+    document.getElementById('t8-badge').className='badge running';
+    this.startMs=Date.now();
+    this.timer=setInterval(()=>document.getElementById('t8-elapsed').textContent=((Date.now()-this.startMs)/1000|0)+'s',1000);
+    this.updateStats();
+
+    try{
+      // Step 1: kecamatan
+      this.log(`Fetching kecamatan for kabupaten ${kab}...`,'s');
+      const kecRows=await this.fetchLevel('kecamatan','kabupaten',kab);
+      if(this.stopped)return;
+      if(!kecRows?.length){this.log('No kecamatan returned.','r');return;}
+      const kecCodes=this.extractCodes(kecRows,7);
+      this.stats.kec=kecCodes.length;
+      this.log(`Found ${kecCodes.length} kecamatan`,'s');
+      this.updateStats();
+
+      // Step 2: desa (sequential — few kecamatan, log each)
+      const desaCodes=[];
+      for(const kecCode of kecCodes){
+        if(this.stopped)break;
+        const desaRows=await this.fetchLevel('desa','kecamatan',kecCode);
+        if(desaRows){
+          const codes=this.extractCodes(desaRows,10);
+          for(const c of codes)desaCodes.push(c);
+          this.log(`Kec ${kecCode}: ${codes.length} desa (total ${desaCodes.length})`,'i');
+        }
+        this.stats.desa=desaCodes.length;
+        this.updateStats();
+        if(delay>0)await sleep(delay);
+      }
+      if(this.stopped)return;
+      this.log(`Desa complete: ${desaCodes.length} desa total`,'s');
+
+      // Step 3: sls (concurrent) — log every 10 desa processed
+      const slsCodes=[];
+      let desaDone=0;
+      const slsMilestone=Math.max(1,Math.ceil(desaCodes.length/10));
+      this.wq=new WorkQueue(conc);
+      await Promise.all(desaCodes.map(desaCode=>async()=>{
+        if(this.stopped)return;
+        const slsRows=await this.wq.run(async()=>{
+          const r=await this.fetchLevel('sls','desa',desaCode);
+          if(delay>0)await sleep(delay);
+          return r;
+        });
+        if(slsRows){const codes=this.extractCodes(slsRows,14);for(const c of codes)slsCodes.push(c);}
+        desaDone++;
+        this.stats.sls=slsCodes.length;
+        this.updateStats();
+        if(desaDone%slsMilestone===0||desaDone===desaCodes.length)
+          this.log(`SLS scan: ${desaDone}/${desaCodes.length} desa done, ${slsCodes.length} SLS found`,'i');
+      }).map(t=>t()));
+      if(this.stopped)return;
+      this.log(`SLS complete: ${slsCodes.length} SLS total`,'s');
+      this.stats.sls=slsCodes.length;
+      this.updateStats();
+
+      // Step 4: sub_sls (concurrent) — log every 5% progress
+      let lastPct=-1;
+      const total=slsCodes.length;
+      this.wq=new WorkQueue(conc);
+      await Promise.all(slsCodes.map(slsCode=>async()=>{
+        if(this.stopped)return;
+        const subRows=await this.wq.run(async()=>{
+          const r=await this.fetchLevel('sub_sls','sls',slsCode);
+          if(delay>0)await sleep(delay);
+          return r;
+        });
+        if(subRows){
+          for(const row of subRows)await DB.add('t8_results',row);
+          this.stats.records+=subRows.length;
+        }
+        this.stats.subslsDone++;
+        this.updateStats();
+        const pct=total>0?Math.floor(this.stats.subslsDone/total*20)*5:0;
+        if(pct>lastPct){lastPct=pct;this.log(`Sub-SLS: ${this.stats.subslsDone}/${total} (${pct}%), ${this.stats.records} rows stored`,'i');}
+      }).map(t=>t()));
+
+    }finally{
+      clearInterval(this.timer);
+      this.collecting=false;
+      const state=this.stopped?'stopped':'done';
+      document.getElementById('t8-badge').textContent={done:'Done',stopped:'Stopped'}[state];
+      document.getElementById('t8-badge').className=`badge ${state}`;
+      document.getElementById('t8-start').disabled=false;
+      document.getElementById('t8-stop').disabled=true;
+      const total=await DB.count('t8_results');
+      this.log(`${this.stopped?'Stopped':'Done'} — ${total} records, ${this.stats.err} error${this.stats.err===1?'':'s'}.`,this.stopped?'w':'s');
+      await this.populateIndikatorDropdown();
+      showDL('t8',total);
+    }
+  },
+
+  stop(){this.stopped=true;this.log('Stop requested...','w');document.getElementById('t8-stop').disabled=true;},
+
+  selectedIndikator(){return document.getElementById('t8-indikator-dl')?.value||'';},
+
+  rowMapper(r){
+    const filter=this.selectedIndikator();
+    if(filter&&String(r.nama_indikator??'')!==filter)return null;
+    const out={};this.HEADERS.forEach(h=>out[h]=r[h]??'');return out;
+  },
+
+  async populateIndikatorDropdown(){
+    const sel=document.getElementById('t8-indikator-dl');
+    if(!sel)return;
+    const prev=sel.value;
+    const seen=new Set();
+    await DB.stream('t8_results',1000,async chunk=>{for(const row of chunk){const v=String(row.nama_indikator??'').trim();if(v)seen.add(v);}});
+    sel.innerHTML='<option value="">All indikator</option>';
+    for(const v of [...seen].sort()){const o=document.createElement('option');o.value=v;o.textContent=v;if(v===prev)o.selected=true;sel.appendChild(o);}
+  },
+
+  async exportJSON(){
+    const filter=this.selectedIndikator();
+    const rows=(await DB.getAll('t8_results')).filter(r=>!filter||String(r.nama_indikator??'')===filter);
+    if(!rows.length)return;
+    const label=filter?`_${filter.replace(/[^a-z0-9]/gi,'_')}`:'';
+    downloadBlob(new Blob([JSON.stringify(rows.map(r=>{const out={};this.HEADERS.forEach(h=>out[h]=r[h]??'');return out;}),null,2)],{type:'application/json'}),`prelist_subsls${label}_${nowTs()}.json`);
+    this.log(`Exported ${rows.length} rows as JSON${filter?` (${filter})`:''}`, 's');
+  },
+
+  async exportCSV(){
+    const filter=this.selectedIndikator();
+    const label=filter?`_${filter.replace(/[^a-z0-9]/gi,'_')}`:'';
+    showExportProgress('Writing CSV to disk (File Save dialog will open)...');
+    try{
+      const n=await DB.exportCSV('t8_results',this.HEADERS,r=>this.rowMapper(r),`prelist_subsls${label}_${nowTs()}.csv`);
+      this.log(n?`Exported ${n} rows via File Save${filter?` (${filter})`:''}`: 'Export cancelled','s');
+    }catch(e){this.log(`CSV export failed: ${e.message}`,'r');}
+    finally{hideExportProgress();}
+  },
+
+  async exportXLSX(){
+    const filter=this.selectedIndikator();
+    const label=filter?`_${filter.replace(/[^a-z0-9]/gi,'_')}`:'';
+    showExportProgress();exportCancelled=false;
+    try{
+      const sheet=filter?`Prelist ${filter}`:'Prelist Sub-SLS';
+      await DB.exportXLSX('t8_results',sheet,this.HEADERS,r=>this.rowMapper(r),`prelist_subsls${label}`,50000,updateExportProgress);
+      this.log(`XLSX export complete${filter?` (${filter})`:''}`,'s');
+    }catch(e){this.log(`XLSX export failed: ${e.message}`,'r');}
+    finally{hideExportProgress();}
+  },
+};
+
+// ────────────────────────────────────────────────────────────────────────────
 // Shared UI helpers
 // ────────────────────────────────────────────────────────────────────────────
-const LOG_BUF={t1:[],t2:[],t3:[],t4:[],t5:[],t6:[],t7:[]};
+const LOG_BUF={t1:[],t2:[],t3:[],t4:[],t5:[],t6:[],t7:[],t8:[]};
 function addLog(tab,msg,cls='i'){const ts=new Date().toLocaleTimeString('en-GB');LOG_BUF[tab].unshift({ts,msg,cls});if(LOG_BUF[tab].length>300)LOG_BUF[tab].length=300;renderLog(tab);}
 function clearLog(tab){LOG_BUF[tab]=[];renderLog(tab);}
 function renderLog(tab){const el=document.getElementById(`${tab}-log-area`);if(!el)return;el.innerHTML=LOG_BUF[tab].map(e=>`<div class="le l${e.cls}"><span class="lts">${e.ts}</span>${escHtml(e.msg)}</div>`).join('');}
@@ -2029,7 +2708,7 @@ function saveStorage(key,data){try{chrome.storage.local.set({[key]:data});}catch
 function loadStorage(){
   try{chrome.storage.local.get(['t1data'],res=>{
     if(!res?.t1data?.rows?.length)return;
-    const{level2FullCode,collectedAt,rows}=res.t1data;T1.rows=rows;T1.stats.rows=rows.length;
+    const{level2FullCode,collectedAt,rows,survey}=res.t1data;T1.rows=rows;T1.stats.rows=rows.length;if(survey)T1.survey=survey;
     const prev=document.getElementById('t1-prev');prev.style.display='block';
     document.getElementById('t1-prev-info').textContent=`Previous: ${level2FullCode} — ${rows.length} rows (${new Date(collectedAt).toLocaleString()})`;
     document.getElementById('t1-load-prev').onclick=()=>{showDL('t1',rows.length);T2.refreshInfo();T6.refreshInfo();addLog('t1',`Loaded ${rows.length} rows from storage`,'s');};
@@ -2044,10 +2723,13 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   await DB.open();// initialise IndexedDB first
 
   // Restore DB counts on load
-  for(const tab of['t2','t3','t6']){
+  for(const tab of['t2','t3','t6','t8']){
     const store=`${tab}_results`;
     const n=await DB.count(store);
-    if(n>0){showDL(tab,n);addLog(tab,`Found ${n} rows in local database from previous session.`,'s');}
+    if(n>0){
+      showDL(tab,n);addLog(tab,`Found ${n} rows in local database from previous session.`,'s');
+      if(tab==='t8')await T8.populateIndikatorDropdown();
+    }
   }
   for(const tab of['t2','t3']){
     const errCount=await DB.count(`${tab}_errors`);
@@ -2059,12 +2741,13 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
     document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
     btn.classList.add('active');document.getElementById(btn.dataset.tab).classList.add('active');
-    if(btn.dataset.tab==='t2')T2.refreshInfo();if(btn.dataset.tab==='t3')T3.refreshInfo();if(btn.dataset.tab==='t6')T6.refreshInfo();if(btn.dataset.tab==='t7'){renderLog('t7');T7.refreshTab2Info();}
+    if(btn.dataset.tab==='t2')T2.refreshInfo();if(btn.dataset.tab==='t3')T3.refreshInfo();if(btn.dataset.tab==='t6')T6.refreshInfo();if(btn.dataset.tab==='t7'){renderLog('t7');T7.refreshTab2Info();T7.refreshTab6Info();}if(btn.dataset.tab==='t8')renderLog('t8');
   }));
 
   document.getElementById('exp-cancel').addEventListener('click',()=>{exportCancelled=true;hideExportProgress();});
 
   // Tab 1
+  document.getElementById('t1-survey').addEventListener('change',e=>{T1.survey=e.target.value;T6.refreshInfo();});
   document.getElementById('t1-start').addEventListener('click',()=>{if(!T1.collecting)T1.start();});
   document.getElementById('t1-stop').addEventListener('click',()=>T1.stop());
   document.getElementById('t1-json').addEventListener('click',()=>T1.exportJSON());
@@ -2093,6 +2776,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('t3-clear-db').addEventListener('click',()=>T3.clearDB());
 
   // Tab 6
+  document.getElementById('t6-survey-type').addEventListener('change',e=>{T6.survey=e.target.value;T6.refreshInfo();});
   document.getElementById('t6-start').addEventListener('click',()=>{if(!T6.running)T6.start();});
   document.getElementById('t6-stop').addEventListener('click',()=>T6.stop());
   document.getElementById('t6-json').addEventListener('click',()=>T6.exportJSON());
@@ -2100,6 +2784,48 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('t6-xlsx').addEventListener('click',()=>T6.exportXLSX());
   document.getElementById('t6-err-exp').addEventListener('click',()=>T6.exportErrors());
   document.getElementById('t6-retry-err').addEventListener('click',()=>{if(!T6.running)T6.retryErrors();});
+  document.getElementById('t6-agg-csv').addEventListener('click',()=>T6.exportAggregateCSV());
+  document.getElementById('t6-agg-xlsx').addEventListener('click',()=>T6.exportAggregateXLSX());
+  {
+    const dlType=document.getElementById('t6-dl-type');
+    const rawSec=document.getElementById('t6-raw-section');
+    const aggSec=document.getElementById('t6-agg-section');
+    const aggPanel=document.getElementById('t6-agg-panel');
+    dlType.addEventListener('change',()=>{
+      const isAgg=dlType.value==='agg';
+      rawSec.style.display=isAgg?'none':'flex';
+      aggSec.style.display=isAgg?'flex':'none';
+      aggPanel.style.display=isAgg?'block':'none';
+      if(isAgg)T6.refreshAggT4Info();
+    });
+    // T4 source radio
+    const srcT4=document.getElementById('t6-agg-src-t4');
+    const srcFile=document.getElementById('t6-agg-src-file');
+    const fromT4=document.getElementById('t6-agg-from-t4');
+    const fromFile=document.getElementById('t6-agg-from-file');
+    srcT4.addEventListener('click',()=>{
+      T6.aggSource='t4';
+      srcT4.classList.add('active');srcFile.classList.remove('active');
+      fromT4.style.display='';fromFile.style.display='none';
+      T6.refreshAggT4Info();
+      document.getElementById('t6-agg-ready-info').textContent='Configure T4 source below, then export.';
+    });
+    srcFile.addEventListener('click',()=>{
+      T6.aggSource='file';
+      srcFile.classList.add('active');srcT4.classList.remove('active');
+      fromFile.style.display='';fromT4.style.display='none';
+      const ready=T6.aggFileMap?`${T6.aggFileMap.size} email entries from file.`:'No file loaded yet.';
+      document.getElementById('t6-agg-ready-info').textContent=ready;
+    });
+    // File drop / click for T4 upload
+    const drop=document.getElementById('t6-agg-drop');
+    const fileInput=document.getElementById('t6-agg-file-input');
+    drop.addEventListener('click',()=>fileInput.click());
+    drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag');});
+    drop.addEventListener('dragleave',()=>drop.classList.remove('drag'));
+    drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag');const f=e.dataTransfer.files[0];if(f)T6.loadAggFile(f);});
+    fileInput.addEventListener('change',()=>{if(fileInput.files[0])T6.loadAggFile(fileInput.files[0]);fileInput.value='';});
+  }
   document.getElementById('t6-clear-db').addEventListener('click',()=>T6.clearDB());
 
   function makeSourceToggle(srcBtnId,fileBtnId,fromSrcId,fromFileId,obj,primaryMode,dropId,inputId){
@@ -2120,7 +2846,15 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('t3-mode-predef').addEventListener('click',()=>{T3.exportMode='predef';document.getElementById('t3-mode-predef').classList.add('active');document.getElementById('t3-mode-data').classList.remove('active');});
 
   // Tab 4
-  document.getElementById('t4-payload').value=JSON.stringify(T4.DEFAULT_PAYLOAD,null,2);
+  {
+    const roles=['pencacah','pengawas'];
+    roles.forEach(r=>{
+      document.getElementById(`t4-role-${r}`).addEventListener('click',()=>{
+        T4.role=r;
+        roles.forEach(x=>document.getElementById(`t4-role-${x}`).classList.toggle('active',x===r));
+      });
+    });
+  }
   document.getElementById('t4-start').addEventListener('click',()=>T4.start());
   document.getElementById('t4-stop').addEventListener('click',()=>T4.stop());
   document.getElementById('t4-resume-btn').addEventListener('click',()=>{
@@ -2158,7 +2892,33 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('t7-csv').addEventListener('click',()=>T7.exportCSV());
   document.getElementById('t7-xlsx').addEventListener('click',()=>T7.exportXLSX());
 
+  // Status-enrich checkbox + 3-way source
   {
+    const cb=document.getElementById('t7-status-enrich');
+    const opts=document.getElementById('t7-status-enrich-opts');
+    cb.addEventListener('change',()=>{opts.style.display=cb.checked?'block':'none';if(cb.checked)T7.refreshTab6Info();});
+    const srcBtns={api:'t7-status-src-api',tab6:'t7-status-src-tab6',file:'t7-status-src-file'};
+    const panels={api:'t7-status-from-api',tab6:'t7-status-from-tab6',file:'t7-status-from-file'};
+    Object.entries(srcBtns).forEach(([mode,btnId])=>{
+      document.getElementById(btnId).addEventListener('click',()=>{
+        T7.statusEnrichSource=mode;
+        Object.entries(srcBtns).forEach(([m,id])=>document.getElementById(id).classList.toggle('active',m===mode));
+        Object.entries(panels).forEach(([m,id])=>document.getElementById(id).style.display=m===mode?'':'none');
+        if(mode==='tab6')T7.refreshTab6Info();
+      });
+    });
+    const drop=document.getElementById('t7-status-drop'),input=document.getElementById('t7-status-file-input');
+    drop.addEventListener('click',()=>input.click());
+    drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag');});
+    drop.addEventListener('dragleave',()=>drop.classList.remove('drag'));
+    drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag');const f=e.dataTransfer.files[0];if(f)T7.loadStatusFile(f);});
+    input.addEventListener('change',()=>{const f=input.files[0];if(f)T7.loadStatusFile(f);input.value='';});
+  }
+  // data1/data2 enrich checkbox + source
+  {
+    const cb=document.getElementById('t7-enrich');
+    const opts=document.getElementById('t7-enrich-opts');
+    cb.addEventListener('change',()=>{opts.style.display=cb.checked?'block':'none';if(cb.checked)T7.refreshTab2Info();});
     const srcBtns={api:'t7-enrich-src-api',tab2:'t7-enrich-src-tab2',file:'t7-enrich-src-file'};
     const panels={api:'t7-enrich-from-api',tab2:'t7-enrich-from-tab2',file:'t7-enrich-from-file'};
     Object.entries(srcBtns).forEach(([mode,btnId])=>{
@@ -2176,6 +2936,39 @@ document.addEventListener('DOMContentLoaded', async ()=>{
     drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag');const f=e.dataTransfer.files[0];if(f)T7.loadEnrichFile(f);});
     input.addEventListener('change',()=>{const f=input.files[0];if(f)T7.loadEnrichFile(f);});
   }
+
+  // Tab 4 — prelist comparison
+  {
+    const cb=document.getElementById('t4-prelist-compare');
+    const opts=document.getElementById('t4-prelist-opts');
+    cb.addEventListener('change',()=>{
+      opts.style.display=cb.checked?'block':'none';
+      if(cb.checked&&T4.prelistSource==='tab8')T4.refreshPrelistTab8Info();
+    });
+    const srcBtns={tab8:'t4-prelist-src-tab8',file:'t4-prelist-src-file'};
+    const panels={tab8:'t4-prelist-from-tab8',file:'t4-prelist-from-file'};
+    Object.entries(srcBtns).forEach(([mode,btnId])=>{
+      document.getElementById(btnId).addEventListener('click',()=>{
+        T4.prelistSource=mode;T4.prelistMaps=null;
+        Object.entries(srcBtns).forEach(([m,id])=>document.getElementById(id).classList.toggle('active',m===mode));
+        Object.entries(panels).forEach(([m,id])=>document.getElementById(id).style.display=m===mode?'':'none');
+        if(mode==='tab8')T4.refreshPrelistTab8Info();
+      });
+    });
+    const drop=document.getElementById('t4-prelist-drop'),input=document.getElementById('t4-prelist-file-input');
+    drop.addEventListener('click',()=>input.click());
+    drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag');});
+    drop.addEventListener('dragleave',()=>drop.classList.remove('drag'));
+    drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag');const f=e.dataTransfer.files[0];if(f)T4.loadPrelistFile(f);});
+    input.addEventListener('change',()=>{const f=input.files[0];if(f)T4.loadPrelistFile(f);input.value='';});
+  }
+
+  // Tab 8
+  document.getElementById('t8-start').addEventListener('click',()=>{if(!T8.collecting)T8.start();});
+  document.getElementById('t8-stop').addEventListener('click',()=>T8.stop());
+  document.getElementById('t8-json').addEventListener('click',()=>T8.exportJSON());
+  document.getElementById('t8-csv').addEventListener('click',()=>T8.exportCSV());
+  document.getElementById('t8-xlsx').addEventListener('click',()=>T8.exportXLSX());
 
   ['t1','t2','t3','t4'].forEach(t=>setStatus(t,'idle'));
   setStatus5('idle');

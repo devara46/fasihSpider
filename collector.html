@@ -124,6 +124,7 @@
     <div class="nav-group-label">Dashboard Collector</div>
     <div class="nav-group">
       <button class="nav-btn" data-tab="t7"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>Anomaly</span><span class="nb-sub">Case by Kabupaten</span></button>
+      <button class="nav-btn" data-tab="t8"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>Prelist</span><span class="nb-sub">Sub-SLS aggregate</span></button>
     </div>
     <hr class="nav-divider">
     <div class="nav-group-label">Raw Collector</div>
@@ -148,6 +149,13 @@
   <div class="split">
     <div class="panel cfg">
       <div class="slabel">Configuration</div>
+      <div class="field">
+        <label>Survey</label>
+        <select id="t1-survey">
+          <option value="se2026" selected>SE2026</option>
+          <option value="pln">PLN Pascabayar 2026</option>
+        </select>
+      </div>
       <div class="field">
         <label>Level 2 Full Code</label>
         <input id="t1-l2" type="text" placeholder="e.g. 5206" maxlength="10">
@@ -233,7 +241,7 @@
         </div>
       </div>
       <div id="t2-from-file" style="display:none;">
-        <div class="drop-area" id="t2-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">.json .csv .txt .xlsx</span></div>
+        <div class="drop-area" id="t2-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">.json .csv .txt .xlsx &mdash; one value per line, or tabular with <code>fullCode</code> column</span></div>
         <input type="file" id="t2-file-input" accept=".json,.csv,.txt,.xlsx,.xls" style="display:none;">
         <div class="info-box" id="t2-file-info" style="display:none;"></div>
       </div>
@@ -296,7 +304,7 @@
         <div class="info-box" id="t3-tab2-info">No Assignment List Tab results yet.</div>
       </div>
       <div id="t3-from-file" style="display:none;">
-        <div class="drop-area" id="t3-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">.json .csv .txt — one assignmentId per line/row</span></div>
+        <div class="drop-area" id="t3-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">.json .csv .txt .xlsx &mdash; one value per line, or tabular with <code>assignmentId</code> column</span></div>
         <input type="file" id="t3-file-input" accept=".json,.csv,.txt,.xlsx,.xls" style="display:none;">
         <div class="info-box" id="t3-file-info" style="display:none;"></div>
       </div>
@@ -359,6 +367,14 @@
 <div class="tab-content" id="t6">
   <div class="split">
     <div class="panel cfg">
+      <div class="slabel">Configuration</div>
+      <div class="field">
+        <label>Survey</label>
+        <select id="t6-survey-type">
+          <option value="se2026" selected>SE2026</option>
+          <option value="pln">PLN Pascabayar 2026</option>
+        </select>
+      </div>
       <div class="slabel">Data Source</div>
       <div class="radio-group">
         <div class="radio-btn active" id="t6-src-tab1">Region Hierarchy Tab</div>
@@ -374,7 +390,6 @@
       </div>
       <hr class="divider">
       <div class="slabel">Settings</div>
-      <div class="field"><label>Survey Period ID</label><input id="t6-survey" type="text" value="fd68e454-ba45-4b85-8205-f3bf777ded24"></div>
       <div class="row3">
         <div class="field"><label>Concurrency</label><input id="t6-conc" type="number" value="1" min="1" max="10"></div>
         <div class="field"><label>Page Length</label><input id="t6-length" type="number" value="10" min="1" max="500"></div>
@@ -409,13 +424,45 @@
   </div>
   <div class="dl-bar" id="t6-dl">
     <div class="dl-row">
-      <div class="dl-info">Ready: <strong id="t6-dl-count">0</strong> records <span style="font-size:10px;color:var(--muted);">CSV=Save dialog &bull; XLSX=split 50K/file</span></div>
-      <button class="btn btn-exp"      id="t6-json">&#128196; JSON</button>
-      <button class="btn btn-exp csv"  id="t6-csv">&#128202; CSV</button>
-      <button class="btn btn-exp xlsx" id="t6-xlsx">&#128209; XLSX</button>
+      <div class="field" style="margin:0;min-width:170px;flex:none;"><label>Download Type</label>
+        <select id="t6-dl-type">
+          <option value="raw">Raw Assignment Status</option>
+          <option value="agg">Aggregate by Email</option>
+        </select>
+      </div>
+      <div id="t6-raw-section" style="display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap;">
+        <div class="dl-info">Ready: <strong id="t6-dl-count">0</strong> records <span style="font-size:10px;color:var(--muted);">CSV=Save dialog &bull; XLSX=split 50K/file</span></div>
+        <button class="btn btn-exp"      id="t6-json">&#128196; JSON</button>
+        <button class="btn btn-exp csv"  id="t6-csv">&#128202; CSV</button>
+        <button class="btn btn-exp xlsx" id="t6-xlsx">&#128209; XLSX</button>
+      </div>
+      <div id="t6-agg-section" style="display:none;align-items:center;gap:8px;flex:1;flex-wrap:wrap;">
+        <div class="dl-info" id="t6-agg-ready-info" style="font-size:11px;color:var(--muted);">Configure T4 source below, then export.</div>
+        <button class="btn btn-exp csv"  id="t6-agg-csv">&#128202; Agg. CSV</button>
+        <button class="btn btn-exp xlsx" id="t6-agg-xlsx">&#128209; Agg. XLSX</button>
+      </div>
       <div class="dl-sep"></div>
       <button class="btn btn-exp err" id="t6-err-exp" disabled>&#9888; No errors</button>
       <button class="btn btn-start" id="t6-retry-err" disabled>&#8635; Retry Errors</button>
+    </div>
+    <div id="t6-agg-panel" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);">
+      <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;">
+        <div style="flex:none;">
+          <div style="font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:5px;">T4 Source</div>
+          <div class="radio-group" style="margin:0;">
+            <div class="radio-btn active" id="t6-agg-src-t4" style="font-size:11px;">Current T4 Tab</div>
+            <div class="radio-btn"       id="t6-agg-src-file" style="font-size:11px;">Upload File</div>
+          </div>
+        </div>
+        <div id="t6-agg-from-t4" style="flex:1;min-width:160px;">
+          <div class="info-box" id="t6-agg-t4-info" style="margin:0;">No Report Progress data in T4 tab yet.</div>
+        </div>
+        <div id="t6-agg-from-file" style="flex:1;min-width:160px;display:none;">
+          <div class="drop-area" id="t6-agg-drop" style="margin:0;padding:10px;">&#128196; Click or drag T4 export file<br><span style="font-size:10px;">.json .csv .xlsx &mdash; needs <code>email</code> &amp; <code>regionCode</code> columns</span></div>
+          <input type="file" id="t6-agg-file-input" accept=".json,.csv,.txt,.xlsx,.xls" style="display:none;">
+          <div class="info-box" id="t6-agg-file-info" style="display:none;margin-top:6px;margin-bottom:0;"></div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -424,7 +471,7 @@
 <div class="tab-content active" id="t4">
   <div class="split">
     <div class="panel cfg">
-      <div class="slabel">Request Payload</div>
+      <div class="slabel">Configuration</div>
       <div class="resume-banner" id="t4-resume">
         <div class="rb-row">
           <span id="t4-resume-text"></span>
@@ -434,12 +481,37 @@
           </span>
         </div>
       </div>
-      <textarea id="t4-payload" spellcheck="false"></textarea>
-      <div class="hint" style="margin:4px 0 9px;">Sent as-is each call. <code>page</code> is overwritten automatically.</div>
-      <div class="field"><label>Concurrency</label><input id="t4-conc" type="number" value="1" min="1" max="5"></div>
+      <div class="slabel" style="margin-bottom:5px;">Role</div>
+      <div class="radio-group">
+        <div class="radio-btn active" id="t4-role-pencacah">Pencacah</div>
+        <div class="radio-btn"       id="t4-role-pengawas">Pengawas</div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Size (max 10)</label><input id="t4-size" type="number" value="10" min="1" max="10"></div>
+        <div class="field"><label>Concurrency</label><input id="t4-conc" type="number" value="1" min="1" max="5"></div>
+      </div>
       <div class="btn-row">
         <button class="btn btn-start" id="t4-start">&#9654; Start</button>
         <button class="btn btn-stop"  id="t4-stop" disabled>&#9632; Stop</button>
+      </div>
+      <hr class="divider">
+      <div class="field" style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+        <input id="t4-prelist-compare" type="checkbox" style="width:auto;flex:none;">
+        <label for="t4-prelist-compare" style="margin:0;font-size:12px;color:var(--text);">Compare to prelist</label>
+      </div>
+      <div id="t4-prelist-opts" style="display:none;">
+        <div class="radio-group">
+          <div class="radio-btn active" id="t4-prelist-src-tab8">Prelist Tab</div>
+          <div class="radio-btn"       id="t4-prelist-src-file">Upload File</div>
+        </div>
+        <div id="t4-prelist-from-tab8">
+          <div class="info-box" id="t4-prelist-tab8-info">No Prelist Tab data yet.</div>
+        </div>
+        <div id="t4-prelist-from-file" style="display:none;">
+          <div class="drop-area" id="t4-prelist-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">Needs <code>id_wilayah</code> &amp; <code>total_value</code> columns</span></div>
+          <input type="file" id="t4-prelist-file-input" accept=".json,.csv,.txt,.xlsx,.xls" style="display:none;">
+          <div class="info-box" id="t4-prelist-file-info" style="display:none;"></div>
+        </div>
       </div>
     </div>
     <div class="panel stats no-br">
@@ -488,13 +560,36 @@
       <div class="slabel">Configuration</div>
       <div class="field">
         <label>Kabupaten Code</label>
-        <input id="t7-kab" type="text" value="5206" maxlength="10">
+        <input id="t7-kab" type="text" placeholder="e.g. 5206" maxlength="10">
+      </div>
+      <div class="field" style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+        <input id="t7-status-enrich" type="checkbox" style="width:auto;flex:none;">
+        <label for="t7-status-enrich" style="margin:0;font-size:12px;color:var(--text);">Enrich with assignment status</label>
+      </div>
+      <div id="t7-status-enrich-opts" style="display:none;">
+        <div class="radio-group">
+          <div class="radio-btn active" id="t7-status-src-api">Live API</div>
+          <div class="radio-btn"       id="t7-status-src-tab6">Assignment Status Tab</div>
+          <div class="radio-btn"       id="t7-status-src-file">Upload File</div>
+        </div>
+        <div id="t7-status-from-api" class="row2">
+          <div class="field"><label>Status Concurrency</label><input id="t7-status-conc" type="number" value="2" min="1" max="5"></div>
+          <div class="field"><label>Status Delay (ms)</label><input id="t7-status-delay" type="number" value="100" min="0" max="5000" step="50"></div>
+        </div>
+        <div id="t7-status-from-tab6" style="display:none;">
+          <div class="info-box" id="t7-status-tab6-info">No Assignment Status Tab results yet.</div>
+        </div>
+        <div id="t7-status-from-file" style="display:none;">
+          <div class="drop-area" id="t7-status-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">T6 export (.json .csv .xlsx) &mdash; needs <code>id</code> &amp; <code>assignmentStatusAlias</code> columns</span></div>
+          <input type="file" id="t7-status-file-input" accept=".json,.csv,.txt,.xlsx,.xls" style="display:none;">
+          <div class="info-box" id="t7-status-file-info" style="display:none;"></div>
+        </div>
       </div>
       <div class="field" style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
         <input id="t7-enrich" type="checkbox" style="width:auto;flex:none;">
         <label for="t7-enrich" style="margin:0;font-size:12px;color:var(--text);">Enrich with assignment data1/data2</label>
       </div>
-      <div id="t7-enrich-opts">
+      <div id="t7-enrich-opts" style="display:none;">
         <div class="radio-group">
           <div class="radio-btn active" id="t7-enrich-src-api">Live API</div>
           <div class="radio-btn"       id="t7-enrich-src-tab2">Assignment List Tab</div>
@@ -542,12 +637,70 @@
         <select id="t7-type-dl">
           <option value="usaha">Usaha</option>
           <option value="keluarga">Keluarga</option>
+          <option value="merged">Merged (Usaha + Keluarga)</option>
         </select>
       </div>
       <div class="dl-info">Ready: <strong id="t7-dl-count">0</strong> records</div>
       <button class="btn btn-exp"      id="t7-json">&#128196; JSON</button>
       <button class="btn btn-exp csv"  id="t7-csv">&#128202; CSV</button>
       <button class="btn btn-exp xlsx" id="t7-xlsx">&#128209; XLSX</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TAB 8: Prelist ===== -->
+<div class="tab-content" id="t8">
+  <div class="split">
+    <div class="panel cfg">
+      <div class="slabel">Configuration</div>
+      <div class="field">
+        <label>Kabupaten Code</label>
+        <input id="t8-kab" type="text" placeholder="e.g. 5206" maxlength="10">
+      </div>
+      <div class="row2">
+        <div class="field"><label>Concurrency</label><input id="t8-conc" type="number" value="3" min="1" max="10"></div>
+        <div class="field"><label>Delay (ms)</label><input id="t8-delay" type="number" value="200" min="0" max="5000" step="50"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-start" id="t8-start">&#9654; Fetch</button>
+        <button class="btn btn-stop"  id="t8-stop" disabled>&#9632; Stop</button>
+      </div>
+      <hr class="divider">
+      <div class="info-box" style="font-size:10.5px;color:var(--muted);line-height:1.7;">
+        Collects sub-SLS prelist aggregate data from the SE2026 dashboard API.<br>
+        Walks: Kabupaten &rarr; Kecamatan &rarr; Desa &rarr; SLS &rarr; Sub-SLS
+      </div>
+    </div>
+    <div class="panel stats no-br">
+      <div class="slabel">Status</div>
+      <div class="stat-row">
+        <div class="stat">Status: <span id="t8-badge" class="badge idle">Idle</span></div>
+        <div class="stat">Elapsed: <span id="t8-elapsed">0s</span></div>
+        <div class="stat">Errors: <span id="t8-err">0</span></div>
+      </div>
+      <div class="stat-row" style="margin-top:6px;flex-wrap:wrap;gap:8px;">
+        <div class="stat">Kecamatan: <span id="t8-kec">0</span></div>
+        <div class="stat">Desa: <span id="t8-desa">0</span></div>
+        <div class="stat">SLS: <span id="t8-sls">0</span></div>
+        <div class="stat">Sub-SLS: <span id="t8-subsls-done">0</span>/<span id="t8-subsls">0</span></div>
+      </div>
+      <div class="prog-bar" style="margin-top:8px;"><div class="prog-fill" id="t8-prog" style="width:0%"></div></div>
+      <div class="stat" style="margin-top:6px;">Records stored: <strong id="t8-records">0</strong></div>
+    </div>
+    <div class="panel log-p no-br no-bb">
+      <div class="slabel">Activity Log</div>
+      <div class="log-area" id="t8-log-area"></div>
+    </div>
+  </div>
+  <div class="dl-bar" id="t8-dl" style="display:none;">
+    <div class="dl-row">
+      <div class="field" style="margin:0;min-width:200px;"><label>Indikator</label>
+        <select id="t8-indikator-dl"><option value="">All indikator</option></select>
+      </div>
+      <div class="dl-info">Ready: <strong id="t8-dl-count">0</strong> records</div>
+      <button class="btn btn-exp"      id="t8-json">&#128196; JSON</button>
+      <button class="btn btn-exp csv"  id="t8-csv">&#128202; CSV</button>
+      <button class="btn btn-exp xlsx" id="t8-xlsx">&#128209; XLSX</button>
     </div>
   </div>
 </div>
@@ -563,7 +716,7 @@
       </div>
       <div class="slabel">Load Link Reference</div>
       <div class="hint" style="margin-bottom:6px;">File must have <code>kode</code>, <code>keterangan</code>, and <code>link</code> columns (header names, case-insensitive).</div>
-      <div class="drop-area" id="t5-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">.xlsx .csv .txt</span></div>
+      <div class="drop-area" id="t5-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">.xlsx .csv .txt &mdash; requires <code>kode</code>, <code>keterangan</code>, <code>link</code> columns</span></div>
       <input type="file" id="t5-file-input" accept=".xlsx,.xls,.csv,.txt" style="display:none;">
       <div class="info-box" id="t5-file-info" style="display:none;"></div>
       <hr class="divider">
