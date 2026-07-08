@@ -499,10 +499,10 @@ const T2={
     await Promise.all(codes.map(code=>async()=>{
       if(this.stopped)return;
       const j=await this.wq.run(async()=>{this.stats.active++;updateStats('t2',this.stats);const d=await this.fetch(code);this.stats.active--;if(delay>0)await sleep(delay);return d;});
-      this.stats.done++;
       const items=j?.success&&Array.isArray(j.data)?j.data:(j?.success&&j?.data?[j.data]:[]);
       for(const item of items){await DB.add('t2_results',{fullCode:code,...item});if(item.assignmentId)this._assignmentIds.add(item.assignmentId);this.stats.found++;}
       if(items.length)this.log(`OK[${code}] → ${items.length}`,'i');
+      this.stats.done++;
       updateStats('t2',this.stats);
     }).map(t=>t()));
     clearInterval(this.timer);this.collecting=false;
@@ -528,10 +528,10 @@ const T2={
     await Promise.all(codes.map(code=>async()=>{
       if(this.stopped)return;
       const j=await this.wq.run(async()=>{this.stats.active++;updateStats('t2',this.stats);const d=await this.fetch(code);this.stats.active--;if(delay>0)await sleep(delay);return d;});
-      this.stats.done++;
       const items=j?.success&&Array.isArray(j.data)?j.data:(j?.success&&j?.data?[j.data]:[]);
       for(const item of items){await DB.add('t2_results',{fullCode:code,...item});if(item.assignmentId)this._assignmentIds.add(item.assignmentId);this.stats.found++;}
       if(items.length)this.log(`OK[${code}] → ${items.length}`,'i');
+      this.stats.done++;
       updateStats('t2',this.stats);
     }).map(t=>t()));
     clearInterval(this.timer);this.collecting=false;
@@ -1383,7 +1383,7 @@ const T4={
   },
   // ── Prelist comparison ──
   prelistSource:'tab8',prelistMaps:null,
-  PRELIST_INDICATOR:'Jumlah Keluarga Prelist Awal',
+  PRELIST_INDICATOR:'Jumlah Prelist Awal',
 
   computePrelistMaps(rows){
     const subSlsMap=new Map();
@@ -2531,7 +2531,6 @@ const T8={
     const delay=parseInt(document.getElementById('t8-delay').value)||0;
 
     this.collecting=true;this.stopped=false;
-    await DB.clear('t8_results');
     this.stats={kec:0,desa:0,sls:0,subslsDone:0,records:0,err:0};
     clearLog('t8');hideDL('t8');
     document.getElementById('t8-start').disabled=true;
@@ -2543,6 +2542,8 @@ const T8={
     this.updateStats();
 
     try{
+      this.log('Clearing previous data...','i');
+      await DB.clear('t8_results');
       // Step 1: kecamatan
       this.log(`Fetching kecamatan for kabupaten ${kab}...`,'s');
       const kecRows=await this.fetchLevel('kecamatan','kabupaten',kab);
