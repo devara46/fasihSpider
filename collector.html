@@ -127,6 +127,11 @@
       <button class="nav-btn" data-tab="t8"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg></span>Prelist</span><span class="nb-sub">Sub-SLS aggregate</span></button>
     </div>
     <hr class="nav-divider">
+    <div class="nav-group-label">Fasih-SM Bulk Process</div>
+    <div class="nav-group">
+      <button class="nav-btn" data-tab="t9"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></span>Reject</span><span class="nb-sub">Bulk approval reject</span></button>
+    </div>
+    <hr class="nav-divider">
     <div class="nav-group-label">Raw Collector</div>
     <div class="nav-group">
       <button class="nav-btn" data-tab="t1"><span><span class="nb-ico"><svg viewBox="0 0 24 24"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg></span>Region Hierarchy</span><span class="nb-sub">Level 3&ndash;6 codes</span></button>
@@ -640,6 +645,9 @@
           <option value="merged">Merged (Usaha + Keluarga)</option>
         </select>
       </div>
+      <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);cursor:pointer;white-space:nowrap;">
+        <input type="checkbox" id="t7-belum-only" style="width:auto;"> <code>case_status = belum</code> only
+      </label>
       <div class="dl-info">Ready: <strong id="t7-dl-count">0</strong> records</div>
       <button class="btn btn-exp"      id="t7-json">&#128196; JSON</button>
       <button class="btn btn-exp csv"  id="t7-csv">&#128202; CSV</button>
@@ -701,6 +709,62 @@
       <button class="btn btn-exp"      id="t8-json">&#128196; JSON</button>
       <button class="btn btn-exp csv"  id="t8-csv">&#128202; CSV</button>
       <button class="btn btn-exp xlsx" id="t8-xlsx">&#128209; XLSX</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TAB 9: Reject — Fasih-SM Bulk Process ===== -->
+<div class="tab-content" id="t9">
+  <div class="split">
+    <div class="panel cfg">
+      <div class="slabel">Bulk Reject</div>
+      <div class="field">
+        <label>Assignment ID File</label>
+        <div class="drop-area" id="t9-drop">&#128196; Click or drag file here<br><span style="font-size:10px;">.xlsx .xls .csv &mdash; requires <code>id</code> column</span></div>
+        <input type="file" id="t9-file-input" accept=".xlsx,.xls,.csv" style="display:none;">
+        <div class="info-box" id="t9-file-info" style="display:none;"></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Concurrency</label><input id="t9-conc" type="number" value="2" min="1" max="10"></div>
+        <div class="field"><label>Delay (ms)</label><input id="t9-delay" type="number" value="200" min="0" max="5000" step="50"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-start" id="t9-bulk-start">&#9654; Start</button>
+        <button class="btn btn-stop"  id="t9-bulk-stop" disabled>&#9632; Stop</button>
+      </div>
+      <hr class="divider">
+      <div class="slabel">Test — Single Reject</div>
+      <div class="field">
+        <label>Assignment ID</label>
+        <input id="t9-assignment-id" type="text" placeholder="UUID">
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-exp" id="t9-send" style="flex:none;">&#9654; Send</button>
+      </div>
+    </div>
+    <div class="panel stats no-br">
+      <div class="slabel">Progress</div>
+      <div class="stat-row">
+        <div class="stat">Total <span id="t9-total">0</span></div>
+        <div class="stat">Done <span id="t9-done">0</span></div>
+        <div class="stat">OK <span id="t9-ok" style="color:var(--green);">0</span></div>
+        <div class="stat">Err <span id="t9-err" style="color:var(--red);">0</span></div>
+      </div>
+      <div style="background:var(--bg3);border-radius:4px;height:6px;overflow:hidden;margin-bottom:12px;">
+        <div id="t9-prog" style="height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--violet));transition:width .3s;"></div>
+      </div>
+      <div class="slabel" style="margin-top:8px;">Single Test Result</div>
+      <pre id="t9-result" style="font-family:'Cascadia Code',Consolas,monospace;font-size:11px;color:var(--muted);white-space:pre-wrap;word-break:break-all;margin:0;">—</pre>
+    </div>
+    <div class="panel log-p no-br no-bb">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+        <div class="slabel">Activity Log</div>
+        <span style="display:flex;gap:8px;align-items:baseline;">
+          <button class="btn-exp err" id="t9-err-exp" disabled>&#9888; No errors</button>
+          <span class="badge idle" id="t9-badge">Idle</span>
+        </span>
+      </div>
+      <div class="log-area" id="t9-log-area"></div>
     </div>
   </div>
 </div>

@@ -929,7 +929,7 @@ const T6={
     showDL('t6',total);
   },
 
-  T6_HEADERS:['region1Id','region2Id','region3Id','region4Id','region5Id','region6Id','id','codeIdentity','data1','data2','data3','data4','data5','data6','data7','data8','data9','data10','assignmentStatusId','assignmentStatusAlias','strata','currentUserFullname','currentUserUsername','currentUserSurveyRoleName','dateCreated','dateModified'],
+  T6_HEADERS:['region1Id','region2Id','region3Id','region4Id','region5Id','region6Id','id','codeIdentity','data1','data2','data3','data4','data5','data6','data7','data8','data9','data10','assignmentStatusId','assignmentStatusAlias','strata','currentUserFullname','currentUserUsername','currentUserSurveyRoleName','latitude','longitude','dateCreated','dateModified'],
   rowMapper(rec){const f={};this.T6_HEADERS.forEach(h=>f[h]=String(rec[h]??''));return f;},
 
   exportJSON(){this.log('JSON export not supported for large DB datasets — use CSV or XLSX.','w');alert('Use CSV or XLSX export for DB-backed data.');},
@@ -1662,8 +1662,8 @@ const T7={
         total++;
         const hit=r.assignment_id?cache.get(r.assignment_id):null;
         if(hit)matched++;
-        r.data1=hit?hit.data1:'';
-        r.data2=hit?hit.data2:'';
+        r.data1=hit?hit.data1:null;
+        r.data2=hit?hit.data2:null;
       });
       if(!this.store[t].headers.includes('data1'))this.store[t].headers.push('data1');
       if(!this.store[t].headers.includes('data2'))this.store[t].headers.push('data2');
@@ -1750,7 +1750,7 @@ const T7={
         total++;
         const status=r.assignment_id?cache.get(r.assignment_id):null;
         if(status!=null)matched++;
-        r.assignmentStatusAlias=status??'';
+        r.assignmentStatusAlias=status??null;
       });
       if(!this.store[t].headers.includes('assignmentStatusAlias'))this.store[t].headers.push('assignmentStatusAlias');
     });
@@ -1845,9 +1845,13 @@ const T7={
     return{data,headers};
   },
 
+  belumOnly(){return document.getElementById('t7-belum-only')?.checked;},
+
   resolveStore(){
     const type=this.selectedType();
-    return type==='merged'?this.mergedStore():this.store[type]||{data:[],headers:[]};
+    const store=type==='merged'?this.mergedStore():this.store[type]||{data:[],headers:[]};
+    if(!this.belumOnly())return store;
+    return{headers:store.headers,data:store.data.filter(r=>String(r.case_status??'').toLowerCase()==='belum')};
   },
 
   updateDlCount(){
@@ -2685,9 +2689,169 @@ const T8={
 };
 
 // ────────────────────────────────────────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────────────────
+// TAB 9: Reject — Fasih-SM Bulk Process
+// ────────────────────────────────────────────────────────────────────────────
+const T9={
+  BASE:'https://fasih-sm.bps.go.id/app/api/assignment-approval/api/v2/approval',
+  MAX_RETRIES:3,RETRY_BASE_MS:2000,NON_RETRYABLE:[400,401,403,404,422],
+  collecting:false,stopped:false,wq:null,fileIds:[],
+  stats:{total:0,done:0,ok:0,err:0},errors:[],
+
+  log(msg,cls='i'){addLog('t9',msg,cls);},
+
+  async getCsrf(){
+    return new Promise(resolve=>{
+      chrome.cookies.get({url:'https://fasih-sm.bps.go.id',name:'XSRF-TOKEN'},c=>{
+        resolve(c?decodeURIComponent(c.value):null);
+      });
+    });
+  },
+
+  async rejectOne(id,csrf){
+    const payload={assignmentId:id,statusApproval:'false',comment:JSON.stringify({dataKey:'',notes:[]})};
+    for(let attempt=1;;attempt++){
+      if(this.stopped)return null;
+      let status=null;
+      try{
+        const r=await fetch(this.BASE,{method:'POST',credentials:'include',
+          headers:{'Content-Type':'application/json','X-XSRF-TOKEN':csrf},
+          body:JSON.stringify(payload)});
+        status=r.status;
+        if(!r.ok)throw Object.assign(new Error(`HTTP ${r.status}`),{status});
+        return await r.json();
+      }catch(e){
+        const retryable=status===null||!this.NON_RETRYABLE.includes(status);
+        if(!retryable||attempt>this.MAX_RETRIES){throw e;}
+        const delay=this.RETRY_BASE_MS*2**(attempt-1);
+        this.log(`${id}: ${e.message}, retry ${attempt}/${this.MAX_RETRIES} in ${Math.round(delay/1000)}s…`,'w');
+        await sleep(delay);
+      }
+    }
+  },
+
+  updateStats(){
+    const s=this.stats;
+    document.getElementById('t9-total').textContent=s.total;
+    document.getElementById('t9-done').textContent=s.done;
+    document.getElementById('t9-ok').textContent=s.ok;
+    document.getElementById('t9-err').textContent=s.err;
+    const p=document.getElementById('t9-prog');
+    if(p)p.style.width=(s.total>0?s.done/s.total*100:0)+'%';
+  },
+
+  async loadFile(file){
+    try{
+      const table=await readTableFromFile(file);
+      if(!table.length)throw new Error('Empty file.');
+      const hdr=table[0].map(h=>String(h??'').trim().toLowerCase());
+      let col=hdr.indexOf('id');
+      if(col<0)col=hdr.findIndex(h=>/assignment.?id/i.test(h));
+      if(col<0)throw new Error('No "id" column found.');
+      this.fileIds=table.slice(1).map(r=>String(r[col]??'').trim()).filter(Boolean);
+      const info=document.getElementById('t9-file-info');
+      info.style.display='block';
+      info.innerHTML=`<strong>${this.fileIds.length}</strong> IDs loaded from <em>${escHtml(file.name)}</em>`;
+      this.log(`Loaded ${this.fileIds.length} IDs from ${file.name}`,'s');
+    }catch(e){
+      this.fileIds=[];
+      const info=document.getElementById('t9-file-info');
+      info.style.display='block';
+      info.innerHTML=`<strong style="color:var(--red);">Failed:</strong> ${escHtml(e.message)}`;
+      this.log(`File error: ${e.message}`,'r');
+    }
+  },
+
+  async startBulk(){
+    if(this.collecting)return;
+    if(!this.fileIds.length)return alert('Load a file first.');
+    const conc=parseInt(document.getElementById('t9-conc').value)||2;
+    const delay=parseInt(document.getElementById('t9-delay').value)||0;
+
+    const csrf=await this.getCsrf();
+    if(!csrf){this.log('No XSRF-TOKEN cookie — make sure you are logged in','r');return;}
+    this.log(`CSRF: ${csrf.slice(0,8)}…`,'i');
+
+    this.collecting=true;this.stopped=false;this.errors=[];
+    this.stats={total:this.fileIds.length,done:0,ok:0,err:0};
+    clearLog('t9');
+    document.getElementById('t9-bulk-start').disabled=true;
+    document.getElementById('t9-bulk-stop').disabled=false;
+    document.getElementById('t9-badge').textContent='Running';
+    document.getElementById('t9-badge').className='badge running';
+    this.updateStats();
+    this.log(`Start: ${this.fileIds.length} IDs, concurrency ${conc}`,'s');
+
+    this.wq=new WorkQueue(conc);
+    await Promise.all(this.fileIds.map(id=>async()=>{
+      if(this.stopped)return;
+      try{
+        await this.wq.run(async()=>{
+          await this.rejectOne(id,csrf);
+          if(delay>0)await sleep(delay);
+        });
+        this.stats.ok++;
+        this.log(`OK [${id}]`,'s');
+      }catch(e){
+        this.stats.err++;
+        this.errors.push(id);
+        this.log(`ERR [${id}]: ${e.message}`,'r');
+      }
+      this.stats.done++;
+      this.updateStats();
+    }).map(t=>t()));
+
+    this.collecting=false;
+    document.getElementById('t9-bulk-start').disabled=false;
+    document.getElementById('t9-bulk-stop').disabled=true;
+    document.getElementById('t9-badge').textContent=this.stopped?'Stopped':'Done';
+    document.getElementById('t9-badge').className=`badge ${this.stopped?'stopped':'done'}`;
+    this.log(`${this.stopped?'Stopped':'Done'} — ${this.stats.ok} OK, ${this.stats.err} failed.`,this.stats.err?'w':'s');
+    document.getElementById('t9-err-exp').disabled=this.errors.length===0;
+    document.getElementById('t9-err-exp').textContent=this.errors.length>0?`⚠ ${this.errors.length} failed`:'⚠ No errors';
+  },
+
+  stopBulk(){this.stopped=true;this.log('Stopping…','w');document.getElementById('t9-bulk-stop').disabled=true;},
+
+  exportErrors(){
+    if(!this.errors.length)return;
+    downloadBlob(new Blob([this.errors.join('\n')],{type:'text/plain'}),`reject_errors_${nowTs()}.txt`);
+    this.log(`Exported ${this.errors.length} failed IDs`,'s');
+  },
+
+  // ── Single test ──
+  async send(){
+    const id=document.getElementById('t9-assignment-id').value.trim();
+    if(!id)return alert('Enter an Assignment ID.');
+    const badge=document.getElementById('t9-badge');
+    const result=document.getElementById('t9-result');
+    badge.textContent='Running';badge.className='badge running';
+    result.textContent='…';
+    this.log(`POST → ${id}`,'i');
+    const csrf=await this.getCsrf();
+    if(!csrf){this.log('No XSRF-TOKEN cookie found — make sure you are logged in','r');badge.textContent='Error';badge.className='badge stopped';result.textContent='No XSRF-TOKEN cookie.';return;}
+    this.log(`CSRF: ${csrf.slice(0,8)}…`,'i');
+    const payload={assignmentId:id,statusApproval:'false',comment:JSON.stringify({dataKey:'',notes:[]})};
+    try{
+      const r=await fetch(this.BASE,{method:'POST',credentials:'include',
+        headers:{'Content-Type':'application/json','X-XSRF-TOKEN':csrf},
+        body:JSON.stringify(payload)});
+      const text=await r.text();
+      let pretty;try{pretty=JSON.stringify(JSON.parse(text),null,2);}catch(_){pretty=text;}
+      result.textContent=`HTTP ${r.status}\n\n${pretty}`;
+      if(r.ok){badge.textContent='Done';badge.className='badge done';this.log(`${r.status} OK`,'s');}
+      else{badge.textContent='Error';badge.className='badge stopped';this.log(`${r.status} — ${text.slice(0,120)}`,'r');}
+    }catch(e){
+      result.textContent=e.message;badge.textContent='Error';badge.className='badge stopped';
+      this.log(`Fetch error: ${e.message}`,'r');
+    }
+  },
+};
+
+// ────────────────────────────────────────────────────────────────────────────
 // Shared UI helpers
 // ────────────────────────────────────────────────────────────────────────────
-const LOG_BUF={t1:[],t2:[],t3:[],t4:[],t5:[],t6:[],t7:[],t8:[]};
+const LOG_BUF={t1:[],t2:[],t3:[],t4:[],t5:[],t6:[],t7:[],t8:[],t9:[]};
 function addLog(tab,msg,cls='i'){const ts=new Date().toLocaleTimeString('en-GB');LOG_BUF[tab].unshift({ts,msg,cls});if(LOG_BUF[tab].length>300)LOG_BUF[tab].length=300;renderLog(tab);}
 function clearLog(tab){LOG_BUF[tab]=[];renderLog(tab);}
 function renderLog(tab){const el=document.getElementById(`${tab}-log-area`);if(!el)return;el.innerHTML=LOG_BUF[tab].map(e=>`<div class="le l${e.cls}"><span class="lts">${e.ts}</span>${escHtml(e.msg)}</div>`).join('');}
@@ -2889,6 +3053,7 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('t7-fetch').addEventListener('click',()=>T7.fetch());
   document.getElementById('t7-stop').addEventListener('click',()=>T7.stop());
   document.getElementById('t7-type-dl').addEventListener('change',()=>T7.updateDlCount());
+  document.getElementById('t7-belum-only').addEventListener('change',()=>T7.updateDlCount());
   document.getElementById('t7-json').addEventListener('click',()=>T7.exportJSON());
   document.getElementById('t7-csv').addEventListener('click',()=>T7.exportCSV());
   document.getElementById('t7-xlsx').addEventListener('click',()=>T7.exportXLSX());
@@ -2970,6 +3135,20 @@ document.addEventListener('DOMContentLoaded', async ()=>{
   document.getElementById('t8-json').addEventListener('click',()=>T8.exportJSON());
   document.getElementById('t8-csv').addEventListener('click',()=>T8.exportCSV());
   document.getElementById('t8-xlsx').addEventListener('click',()=>T8.exportXLSX());
+
+  // Tab 9
+  document.getElementById('t9-send').addEventListener('click',()=>T9.send());
+  document.getElementById('t9-bulk-start').addEventListener('click',()=>T9.startBulk());
+  document.getElementById('t9-bulk-stop').addEventListener('click',()=>T9.stopBulk());
+  document.getElementById('t9-err-exp').addEventListener('click',()=>T9.exportErrors());
+  {
+    const drop=document.getElementById('t9-drop'),input=document.getElementById('t9-file-input');
+    drop.addEventListener('click',()=>input.click());
+    drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag');});
+    drop.addEventListener('dragleave',()=>drop.classList.remove('drag'));
+    drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag');const f=e.dataTransfer.files[0];if(f){drop.textContent=f.name;T9.loadFile(f);}});
+    input.addEventListener('change',()=>{const f=input.files[0];if(f){drop.textContent=f.name;T9.loadFile(f);}input.value='';});
+  }
 
   ['t1','t2','t3','t4'].forEach(t=>setStatus(t,'idle'));
   setStatus5('idle');
